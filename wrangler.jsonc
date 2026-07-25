@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "setlist-connector",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The connector is STATELESS — the only Durable Object is the harness's
+  // per-session MCP agent (`SetlistMcpAgent`). setlist.fm's read surface needs
+  // no cache, so there is no cache Durable Object here (unlike ofw-connector).
+  "durable_objects": {
+    "bindings": [{ "name": "MCP_OBJECT", "class_name": "SetlistMcpAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SetlistMcpAgent"] }],
+  // setlist-connector's own OAuth token store (title: setlist-connector-oauth).
+  // Kept separate from any other connector's OAUTH_KV so their OAuth grants/tokens
+  // never cross-wire. To stand up a deployment in a different account, create your
+  // own (wrangler kv namespace create setlist-connector-oauth) and replace this id.
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "504dd4721d73452582f588fbd5b3259f" }],
+  // Production custom domain (matches ofw-connector's connector.ofw.nullnet.app
+  // and untappd-mcp's connector.untappd.nullnet.app). The zone must be in the
+  // deploying account's Cloudflare; wrangler provisions the hostname on deploy.
+  // Remove this route to deploy to *.workers.dev only.
+  "routes": [{ "pattern": "connector.setlist.nullnet.app", "custom_domain": true }],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  }
+}

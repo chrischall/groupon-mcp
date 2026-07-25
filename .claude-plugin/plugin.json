@@ -1,0 +1,21 @@
+{
+  "name": "setlist-mcp",
+  "displayName": "setlist.fm",
+  "version": "0.9.2",
+  "description": "MCP server for setlist.fm — search concert setlists, artists, venues, and tours via the setlist.fm API",
+  "author": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "homepage": "https://github.com/chrischall/setlist-mcp",
+  "repository": "https://github.com/chrischall/setlist-mcp",
+  "license": "MIT",
+  "keywords": [
+    "setlist.fm",
+    "setlists",
+    "concerts",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcp": "./.mcp.json"
+}
