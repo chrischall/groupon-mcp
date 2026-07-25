@@ -2,14 +2,22 @@
 import { runMcp } from '@chrischall/mcp-utils';
 import { VERSION } from './version.js';
 import { client } from './client.js';
+import { webClient } from './web-client.js';
 import { registerHealthcheckTools } from './tools/healthcheck.js';
 import { registerDealTools } from './tools/deals.js';
 import { registerDetailTools } from './tools/detail.js';
+import { registerCartTools } from './tools/cart.js';
 
-// Read-path MVP. This phase establishes the Groupon identity and a minimal,
-// read-only stdio MCP server: a dependency-free healthcheck plus the deal
-// search/browse tool backed by the consumer GraphQL endpoint (BrowseDealFeed).
-// Purchase / cookie / connector paths arrive in later phases.
+// The full STDIO server: the anonymous read tools (healthcheck, deal
+// search/browse, deal detail, category taxonomy) PLUS the confirm-gated cart /
+// purchase path (view / add-to-cart / clear). The cart tools authenticate with
+// the user's Groupon session cookie via `webClient`; they resolve deal option
+// ids through the anonymous read `client`. Deferred-config: reads still boot
+// with no credential — the missing-session error surfaces only on the first
+// cart call.
+//
+// The Cloudflare connector (src/worker.ts) deliberately does NOT register the
+// cart tools, keeping the cookie/fetchproxy auth tree out of the Worker bundle.
 await runMcp({
   name: 'groupon-mcp',
   version: VERSION,
@@ -19,5 +27,6 @@ await runMcp({
     registerHealthcheckTools,
     (server) => registerDealTools(server, client),
     (server) => registerDetailTools(server, client),
+    (server) => registerCartTools(server, webClient, client),
   ],
 });

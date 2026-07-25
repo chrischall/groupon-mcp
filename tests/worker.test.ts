@@ -32,10 +32,17 @@ const READ_ONLY_TOOLS = [
   'groupon_list_categories',
 ];
 
-// Write tools that must NOT exist on the hosted read-only connector. There is no
-// purchase/cookie tool in the codebase yet; this guards against one ever leaking
-// into the Worker's tool surface.
-const WRITE_TOOLS = ['groupon_purchase', 'groupon_buy', 'groupon_checkout'];
+// Write / cart tools that must NOT exist on the hosted read-only connector. The
+// cart path (src/tools/cart.ts) is STDIO-only — src/worker.ts deliberately never
+// registers it, keeping the cookie/fetchproxy auth tree out of the Worker
+// bundle. This guards against any of them leaking into the Worker's tool surface.
+const WRITE_TOOLS = [
+  'groupon_purchase',
+  'groupon_view_cart',
+  'groupon_clear_cart',
+  'groupon_buy',
+  'groupon_checkout',
+];
 
 describe('Groupon Cloudflare connector — OAuth surface', () => {
   it('serves the OAuth authorization-server discovery document', async () => {
@@ -92,7 +99,9 @@ describe('Groupon Cloudflare connector — tool surface (read-only)', () => {
     try {
       const names = (await harness.listTools()).map((t) => t.name).sort();
       expect(names).toEqual([...READ_ONLY_TOOLS].sort());
-      // No purchase/write tool may be present.
+      // The confirm-gated cart/purchase path is STDIO-only — it must never
+      // reach the hosted connector.
+      expect(names).not.toContain('groupon_purchase');
       for (const write of WRITE_TOOLS) {
         expect(names).not.toContain(write);
       }
