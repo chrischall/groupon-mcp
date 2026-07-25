@@ -9,10 +9,12 @@ import { tmpdir } from 'node:os';
 // answer tools/list — exactly what an MCP host does at install time. Catches an
 // eager-import crash in the bundle (no node_modules) and a wrong `bin` path.
 //
-// Read-path MVP: the server registers a single placeholder healthcheck tool
-// (which is what makes it advertise the `tools` capability), so this asserts the
-// tools/list handshake returns it. As Groupon deal-read tools land in later
-// phases the assertions tighten.
+// The full STDIO server registers the read tools (healthcheck, search, deal
+// detail, categories) PLUS the confirm-gated cart path (view / purchase /
+// clear) — 7 tools. This asserts the built artifacts boot and list them. The
+// cart tools register with no credential (deferred config): the cookie/
+// fetchproxy tree is a LAZY import reached only on the first cart CALL, so the
+// bundle boots standalone and tools/list succeeds with no session.
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUNDLE = join(ROOT, 'dist', 'bundle.js');
@@ -86,11 +88,14 @@ describe('server boot (built artifacts)', () => {
     try {
       copyFileSync(BUNDLE, join(dir, 'bundle.js'));
       const tools = await listToolsViaStdio(join(dir, 'bundle.js'), dir);
-      expect(tools.length).toBeGreaterThanOrEqual(3);
+      expect(tools.length).toBeGreaterThanOrEqual(6);
       expect(tools).toContain('groupon_healthcheck');
       expect(tools).toContain('groupon_search_deals');
       expect(tools).toContain('groupon_get_deal');
       expect(tools).toContain('groupon_list_categories');
+      expect(tools).toContain('groupon_view_cart');
+      expect(tools).toContain('groupon_purchase');
+      expect(tools).toContain('groupon_clear_cart');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -98,10 +103,13 @@ describe('server boot (built artifacts)', () => {
 
   it('npm bin (dist/index.js) boots with node_modules and lists tools', async () => {
     const tools = await listToolsViaStdio(BIN, ROOT);
-    expect(tools.length).toBeGreaterThanOrEqual(3);
+    expect(tools.length).toBeGreaterThanOrEqual(6);
     expect(tools).toContain('groupon_healthcheck');
     expect(tools).toContain('groupon_search_deals');
     expect(tools).toContain('groupon_get_deal');
     expect(tools).toContain('groupon_list_categories');
+    expect(tools).toContain('groupon_view_cart');
+    expect(tools).toContain('groupon_purchase');
+    expect(tools).toContain('groupon_clear_cart');
   }, 30_000);
 });

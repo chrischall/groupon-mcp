@@ -154,3 +154,111 @@ export function buildMainNavigation(): PersistedQueryOp {
     },
   };
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Cart (write-path) persisted-query ops.
+//
+// These hit the SAME endpoint as the reads, but require the user's
+// AUTHENTICATED SESSION COOKIE (no CSRF header, no x-sig-fraud-check — the
+// cookie alone, verified 2026-07-25). Each op is still persisted-query-only:
+// the hashes are PUBLIC fingerprints of Groupon's own mutations, NOT
+// credentials. They can go stale on a Groupon frontend redeploy (→
+// PersistedQueryNotFound), same recovery as the read hashes.
+//
+// There is NO replayable place-order mutation: checkout is native Apple/Google
+// Pay/card/PayPal SDK hand-off. The write path ends at "added to cart" and the
+// user completes payment at https://www.groupon.com/checkout/cart themselves.
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Persisted-query fingerprint for the `GetCart` op — read the signed-in user's
+ * cart. PUBLIC fingerprint (not a secret). Captured 2026-07-25.
+ * Response: `element[0].data.getCart`.
+ */
+export const GET_CART_HASH =
+  '1471251c7f45dfecdc4625c22e1422f877140e6648e0662d0834b3a92553b45b';
+
+/**
+ * Persisted-query fingerprint for the `createOrUpdateCartItem` mutation — ADD or
+ * update a cart line item. PUBLIC fingerprint (not a secret). Captured 2026-07-25.
+ */
+export const CREATE_OR_UPDATE_CART_ITEM_HASH =
+  'd0aeb632be4f1316c0b83c5b0d1fe556363f9e149ce7fd590728bfe4d41b782d';
+
+/**
+ * Persisted-query fingerprint for the `deleteCartItem` mutation — REMOVE a cart
+ * line item by its optionId. PUBLIC fingerprint (not a secret). Captured 2026-07-25.
+ */
+export const DELETE_CART_ITEM_HASH =
+  '914b02bbaaaef8523256314f64b6939a55635e7757a350646ea788fdcde8326a';
+
+/**
+ * Build the batched-request element for the `GetCart` op. Takes no variables;
+ * the cart is scoped to the session cookie carried on the request.
+ */
+export function buildGetCart(): PersistedQueryOp {
+  return {
+    operationName: 'GetCart',
+    variables: {},
+    extensions: {
+      persistedQuery: { version: 1, sha256Hash: GET_CART_HASH },
+    },
+  };
+}
+
+/** Arguments for {@link buildCreateOrUpdateCartItem}. */
+export interface CreateOrUpdateCartItemArgs {
+  /** The deal option's numeric id (deal.options[].id from a getDeal read). */
+  optionId: string;
+  /** The deal's uuid (deal.uuid from a getDeal read). */
+  dealUuid: string;
+  /** The deal option's uuid (deal.options[].uuid from a getDeal read). */
+  optionUuid: string;
+  /** How many to add. */
+  quantity: number;
+  /** Whether the line is a gift. */
+  isGift: boolean;
+}
+
+/**
+ * Build the batched-request element for the `createOrUpdateCartItem` mutation —
+ * add (or update the quantity of) a deal option in the signed-in user's cart.
+ * All four ids come from a `getDeal` read. Meant to be wrapped in a one-element
+ * array before POSTing.
+ */
+export function buildCreateOrUpdateCartItem({
+  optionId,
+  dealUuid,
+  optionUuid,
+  quantity,
+  isGift,
+}: CreateOrUpdateCartItemArgs): PersistedQueryOp {
+  return {
+    operationName: 'createOrUpdateCartItem',
+    variables: { optionId, dealUuid, optionUuid, quantity, isGift },
+    extensions: {
+      persistedQuery: { version: 1, sha256Hash: CREATE_OR_UPDATE_CART_ITEM_HASH },
+    },
+  };
+}
+
+/** Arguments for {@link buildDeleteCartItem}. */
+export interface DeleteCartItemArgs {
+  /** The optionId of the cart line to remove (from a GetCart read). */
+  optionId: string;
+}
+
+/**
+ * Build the batched-request element for the `deleteCartItem` mutation — remove a
+ * line item from the signed-in user's cart by its optionId. Meant to be wrapped
+ * in a one-element array before POSTing.
+ */
+export function buildDeleteCartItem({ optionId }: DeleteCartItemArgs): PersistedQueryOp {
+  return {
+    operationName: 'deleteCartItem',
+    variables: { optionId },
+    extensions: {
+      persistedQuery: { version: 1, sha256Hash: DELETE_CART_ITEM_HASH },
+    },
+  };
+}
