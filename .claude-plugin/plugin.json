@@ -1,19 +1,19 @@
 {
-  "name": "setlist-mcp",
-  "displayName": "setlist.fm",
-  "version": "0.9.2",
-  "description": "MCP server for setlist.fm — search concert setlists, artists, venues, and tours via the setlist.fm API",
+  "name": "groupon-mcp",
+  "displayName": "Groupon",
+  "version": "0.0.0",
+  "description": "MCP server for Groupon — search and browse local, goods, and travel deals via natural language",
   "author": {
     "name": "Chris Hall",
     "email": "chris.c.hall@gmail.com"
   },
-  "homepage": "https://github.com/chrischall/setlist-mcp",
-  "repository": "https://github.com/chrischall/setlist-mcp",
+  "homepage": "https://github.com/chrischall/groupon-mcp",
+  "repository": "https://github.com/chrischall/groupon-mcp",
   "license": "MIT",
   "keywords": [
-    "setlist.fm",
-    "setlists",
-    "concerts",
+    "groupon",
+    "deals",
+    "coupons",
     "mcp"
   ],
   "skills": "./skills/",

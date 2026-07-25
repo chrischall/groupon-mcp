@@ -1,163 +1,145 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SetlistClient } from '../src/client.js';
+import { describe, it, expect, vi } from 'vitest';
+import { GrouponClient } from '../src/client.js';
+import { BROWSE_DEAL_FEED_HASH } from '../src/graphql-ops.js';
 
-// Capture outbound fetches. createApiClient binds the global `fetch` at
-// construction time, so the stub must be installed BEFORE `new SetlistClient()`.
-interface Call {
-  url: string;
-  init: { method: string; headers: Record<string, string> };
+/** Build a Response-like object for the mocked fetch. */
+function jsonRes(status: number, body: unknown, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...headers },
+  });
 }
 
-describe('SetlistClient', () => {
-  let calls: Call[];
+/** A minimal, well-formed batched BrowseDealFeed response. */
+function feedRes(cards: unknown[] = [{ id: 'deal-1', title: 'Test deal' }]) {
+  return jsonRes(200, [{ data: { browseDealFeed: { cards, facets: [], pagination: {}, browseProps: {}, __typename: 'BrowseDealFeed' } } }]);
+}
 
-  function stubFetch(body: unknown = {}, status = 200): ReturnType<typeof vi.fn> {
-    const fn = vi.fn(async (url: string, init: Call['init']) => {
-      calls.push({ url, init });
-      return new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      });
-    });
-    vi.stubGlobal('fetch', fn);
-    return fn;
-  }
+function makeClient(fetchImpl: typeof fetch, opts: Partial<ConstructorParameters<typeof GrouponClient>[0]> = {}) {
+  return new GrouponClient({
+    fetchImpl,
+    now: () => 1_000_000,
+    sleep: async () => {},
+    ...opts,
+  });
+}
 
-  beforeEach(() => {
-    calls = [];
+describe('GrouponClient', () => {
+  it('POSTs a batched array carrying the persisted hash and query filter', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.browseDealFeed({ query: 'massage', division: 'new-york', limit: 10, offset: 0 });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://www.groupon.com/mobilenextapi/graphql');
+    expect(init.method).toBe('POST');
+    expect(init.headers['content-type']).toBe('application/json');
+    expect(init.headers['apollographql-client-name']).toBe('mobilenextapi');
+
+    const batch = JSON.parse(init.body);
+    expect(Array.isArray(batch)).toBe(true);
+    expect(batch).toHaveLength(1);
+    const op = batch[0];
+    expect(op.operationName).toBe('BrowseDealFeed');
+    expect(op.extensions.persistedQuery.sha256Hash).toBe(BROWSE_DEAL_FEED_HASH);
+    expect(op.variables.dealFeedParams.division).toBe('new-york');
+    expect(op.variables.dealFeedParams.filters).toEqual([
+      { key: 'query', subKey: null, value: { static: 'massage' } },
+    ]);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
-    delete process.env.SETLIST_API_KEY;
-    delete process.env.SETLIST_ACCEPT_LANGUAGE;
+  it('omits the query filter for a plain browse (no query)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.browseDealFeed({ division: 'chicago', limit: 5, offset: 0 });
+
+    const batch = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(batch[0].variables.dealFeedParams.filters).toEqual([]);
   });
 
-  it('sends the x-api-key header and JSON Accept against the rest base URL', async () => {
-    process.env.SETLIST_API_KEY = 'test-key';
-    stubFetch({ ok: 1 });
-    const c = new SetlistClient();
-
-    await c.request('GET', '/1.0/search/countries');
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('https://api.setlist.fm/rest/1.0/search/countries');
-    expect(calls[0].init.method).toBe('GET');
-    expect(calls[0].init.headers['x-api-key']).toBe('test-key');
-    expect(calls[0].init.headers.Accept).toBe('application/json');
+  it('parses browseDealFeed out of element[0].data', async () => {
+    const cards = [{ id: 'a' }, { id: 'b' }];
+    const fetchImpl = vi.fn().mockResolvedValue(feedRes(cards));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const feed = await client.browseDealFeed({ division: 'syracuse', limit: 2, offset: 0 });
+    expect(feed.cards).toEqual(cards);
   });
 
-  it('builds a query string and drops undefined params', async () => {
-    process.env.SETLIST_API_KEY = 'k';
-    stubFetch();
-    const c = new SetlistClient();
-
-    await c.request('GET', '/1.0/search/setlists', {
-      query: { artistName: 'Phish', p: 2, year: undefined },
-    });
-
-    expect(calls[0].url).toBe(
-      'https://api.setlist.fm/rest/1.0/search/setlists?artistName=Phish&p=2',
+  it('maps PersistedQueryNotFound to an actionable McpToolError', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonRes(200, [{ errors: [{ message: 'PersistedQueryNotFound' }] }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 })).rejects.toThrow(
+      /re-captured|persisted query is stale/i,
     );
   });
 
-  it('adds Accept-Language when SETLIST_ACCEPT_LANGUAGE is set', async () => {
-    process.env.SETLIST_API_KEY = 'k';
-    process.env.SETLIST_ACCEPT_LANGUAGE = 'de';
-    stubFetch();
-    const c = new SetlistClient();
-
-    await c.request('GET', '/1.0/search/countries');
-
-    expect(calls[0].init.headers['Accept-Language']).toBe('de');
-  });
-
-  it('rewrites eventDate in responses from dd-MM-yyyy to ISO yyyy-MM-dd', async () => {
-    process.env.SETLIST_API_KEY = 'k';
-    stubFetch({ setlist: [{ id: 'abc', eventDate: '28-08-2025' }] });
-    const c = new SetlistClient();
-
-    const data = await c.request<{ setlist: { eventDate: string }[] }>(
-      'GET',
-      '/1.0/search/setlists',
+  it('rejects a non-JSON 2xx (bot/challenge interstitial) rather than parsing blind', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('<!doctype html><html>Access denied</html>', { status: 200 }));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 })).rejects.toThrow(
+      /non-JSON|interstitial/i,
     );
-
-    expect(data.setlist[0].eventDate).toBe('2025-08-28');
   });
 
-  it('annotates setlists with songCount/setCount/hasSongs', async () => {
-    process.env.SETLIST_API_KEY = 'k';
-    stubFetch({
-      setlist: [
-        { id: 'a', eventDate: '28-08-2025', sets: { set: [{ song: [{ name: 's1' }, { name: 's2' }] }] } },
-        { id: 'stub', eventDate: '01-01-2025', sets: { set: [] } },
-      ],
-    });
-    const c = new SetlistClient();
-
-    const data = await c.request<{ setlist: { hasSongs: boolean; songCount: number }[] }>(
-      'GET',
-      '/1.0/search/setlists',
+  it('surfaces the body on non-2xx HTTP errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('Bad Request', { status: 400 }));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 })).rejects.toThrow(
+      /Groupon GraphQL/i,
     );
-
-    expect(data.setlist[0]).toMatchObject({ songCount: 2, setCount: 1, hasSongs: true });
-    expect(data.setlist[1]).toMatchObject({ songCount: 0, setCount: 0, hasSongs: false });
   });
 
-  it('times out a hung request with a clear, actionable error', async () => {
-    process.env.SETLIST_API_KEY = 'k';
-    vi.useFakeTimers();
-    // A fetch that never resolves until its AbortSignal fires.
-    vi.stubGlobal('fetch', (_url: string, init: { signal: AbortSignal }) =>
-      new Promise((_resolve, reject) => {
-        init.signal.addEventListener('abort', () => {
-          const e = new Error('aborted');
-          (e as { name: string }).name = 'AbortError';
-          reject(e);
-        });
-      }),
+  it('retries once on 429, honoring Retry-After', async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(429, {}, { 'Retry-After': '3' }))
+      .mockResolvedValueOnce(feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch, { sleep });
+    const feed = await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 });
+    expect(feed.cards).toBeDefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(3000);
+  });
+
+  it('surfaces a rate limit still failing after the retry', async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(async () => jsonRes(503, {}, { 'Retry-After': '9999' }));
+    const client = makeClient(fetchImpl as unknown as typeof fetch, { sleep });
+    await expect(client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 })).rejects.toThrow(
+      /rate limit/i,
     );
-    const c = new SetlistClient();
-
-    const p = c.request('GET', '/1.0/search/countries');
-    const assertion = expect(p).rejects.toThrow(/timed out/i);
-    await vi.advanceTimersByTimeAsync(60_000); // fire the timeout regardless of its exact value
-    await assertion;
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleep.mock.calls[0][0]).toBeLessThanOrEqual(30_000);
   });
 
-  it('uses an injected apiKey instead of the environment (per-user constructor seam)', async () => {
-    // The hosted per-user path builds a client with the caller's key; no env var
-    // is set. The injected key must reach the x-api-key header.
-    delete process.env.SETLIST_API_KEY;
-    stubFetch();
-    const c = new SetlistClient({ apiKey: 'injected-key' });
-
-    await c.request('GET', '/1.0/search/countries');
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].init.headers['x-api-key']).toBe('injected-key');
+  it('caches identical requests within the TTL', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.browseDealFeed({ query: 'spa', division: 'new-york', limit: 10, offset: 0 });
+    await client.browseDealFeed({ query: 'spa', division: 'new-york', limit: 10, offset: 0 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the env var when opts carries no apiKey', async () => {
-    // An opts object with no apiKey must not shadow SETLIST_API_KEY — the env
-    // key still wins, so the stdio singleton path stays intact.
-    process.env.SETLIST_API_KEY = 'env-key';
-    stubFetch();
-    const c = new SetlistClient({});
-
-    await c.request('GET', '/1.0/search/countries');
-
-    expect(calls[0].init.headers['x-api-key']).toBe('env-key');
+  it('keys the cache by op args (different offset misses)', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.browseDealFeed({ query: 'spa', division: 'new-york', limit: 10, offset: 0 });
+    await client.browseDealFeed({ query: 'spa', division: 'new-york', limit: 10, offset: 10 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it('defers the config error — constructs without a key, throws on first request', async () => {
-    delete process.env.SETLIST_API_KEY;
-    const fn = stubFetch();
-
-    const c = new SetlistClient(); // must NOT throw
-
-    await expect(c.request('GET', '/1.0/search/countries')).rejects.toThrow(/SETLIST_API_KEY/);
-    expect(fn).not.toHaveBeenCalled(); // no network call when the key is missing
+  it('does not cache when TTL is 0', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch, { cacheTtlMs: 0 });
+    await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 });
+    await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

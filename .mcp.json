@@ -1,11 +1,8 @@
 {
   "mcpServers": {
-    "setlist": {
+    "groupon": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
-      "env": {
-        "SETLIST_API_KEY": "${SETLIST_API_KEY}"
-      }
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"]
     }
   }
 }

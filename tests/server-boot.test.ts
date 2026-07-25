@@ -8,6 +8,11 @@ import { tmpdir } from 'node:os';
 // End-to-end boot guard. Spawns the REAL built artifacts and confirms they
 // answer tools/list — exactly what an MCP host does at install time. Catches an
 // eager-import crash in the bundle (no node_modules) and a wrong `bin` path.
+//
+// Read-path MVP: the server registers a single placeholder healthcheck tool
+// (which is what makes it advertise the `tools` capability), so this asserts the
+// tools/list handshake returns it. As Groupon deal-read tools land in later
+// phases the assertions tighten.
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUNDLE = join(ROOT, 'dist', 'bundle.js');
@@ -24,8 +29,7 @@ function listToolsViaStdio(entry: string, cwd: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const child = spawn('node', [entry], {
       cwd,
-      // No creds: the server must still boot and serve tools/list (deferred-config).
-      env: { ...process.env, SETLIST_API_KEY: '' },
+      env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let out = '';
@@ -76,18 +80,15 @@ function listToolsViaStdio(entry: string, cwd: string): Promise<string[]> {
   });
 }
 
-// Lower bound, not an exact count: the boot test must not break when tools are
-// added on other branches (the PR is CI-tested merged with main).
-const MIN_TOOLS = 10;
-
 describe('server boot (built artifacts)', () => {
   it('bundled .mcpb (dist/bundle.js) boots WITHOUT node_modules and lists tools', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'setlist-mcpb-'));
+    const dir = mkdtempSync(join(tmpdir(), 'groupon-mcpb-'));
     try {
       copyFileSync(BUNDLE, join(dir, 'bundle.js'));
       const tools = await listToolsViaStdio(join(dir, 'bundle.js'), dir);
-      expect(tools.length).toBeGreaterThanOrEqual(MIN_TOOLS);
-      expect(tools).toContain('setlist_healthcheck');
+      expect(tools.length).toBeGreaterThanOrEqual(1);
+      expect(tools).toContain('groupon_healthcheck');
+      expect(tools).toContain('groupon_search_deals');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -95,7 +96,8 @@ describe('server boot (built artifacts)', () => {
 
   it('npm bin (dist/index.js) boots with node_modules and lists tools', async () => {
     const tools = await listToolsViaStdio(BIN, ROOT);
-    expect(tools.length).toBeGreaterThanOrEqual(MIN_TOOLS);
-    expect(tools).toContain('setlist_healthcheck');
+    expect(tools.length).toBeGreaterThanOrEqual(1);
+    expect(tools).toContain('groupon_healthcheck');
+    expect(tools).toContain('groupon_search_deals');
   }, 30_000);
 });

@@ -1,7 +1,0 @@
-# Local Worker dev overrides for `wrangler dev` (copy to `.dev.vars`).
-# setlist.fm has NO app-level API credentials — each user's own setlist.fm API
-# key arrives through the connector's OAuth login form, not from here. The vars
-# below are optional and mirror the toggles the stdio server honors.
-
-# Localize city/country names in setlist.fm responses (e.g. "de", "es").
-# SETLIST_ACCEPT_LANGUAGE=en

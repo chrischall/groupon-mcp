@@ -1,109 +1,196 @@
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   loadDotenvSafely,
   readEnvVar,
-  createApiClient,
-  deepMapStringField,
-  dmyToIso,
-  type ApiClient,
+  readTtlMsEnv,
+  createResponseCache,
+  parseRetryAfterMs,
+  formatApiError,
+  McpToolError,
+  type ResponseCache,
 } from '@chrischall/mcp-utils';
-import { augmentSetlists } from './augment.js';
+import { buildBrowseDealFeed, type BrowseDealFeedArgs } from './graphql-ops.js';
 
 // Load .env for local dev; silently skip if dotenv is unavailable (e.g. the
-// mcpb bundle). `loadDotenvSafely` swallows a missing dotenv module and never
-// lets .env override a host-provided value.
-// The try/catch guards the Cloudflare Worker runtime, where `import.meta.url`
-// is undefined and `fileURLToPath(undefined)` would throw at module init
-// (Worker startup validation) — there is no filesystem / .env to load there.
-try {
-  const dir = dirname(fileURLToPath(import.meta.url));
-  await loadDotenvSafely({ path: join(dir, '..', '.env'), override: false });
-} catch {
-  /* non-Node runtime (Workers): no .env to load */
+// .mcpb bundle). loadDotenvSafely never lets .env override a host-provided value.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+await loadDotenvSafely({ path: join(__dirname, '..', '.env'), override: false });
+
+// Groupon's consumer GraphQL endpoint. Deal reads reach it from a plain
+// server-side fetch with NO cookies / NO auth / NO bot wall — the two headers
+// below are all it wants.
+const DEFAULT_ENDPOINT = 'https://www.groupon.com/mobilenextapi/graphql';
+const SERVICE = 'Groupon GraphQL';
+// Groupon's web client identifies itself with this Apollo client-name header;
+// the endpoint expects it alongside a JSON content type.
+const CLIENT_NAME = 'mobilenextapi';
+// Deal feeds return in a couple of seconds; 30s leaves slack without hanging a host.
+const REQUEST_TIMEOUT_MS = 30_000;
+// Deal listings change slowly relative to a single agent session; a short-TTL
+// response cache absorbs an agent re-issuing the same browse/search. Override
+// with GROUPON_CACHE_TTL (seconds; 0 = off).
+const DEFAULT_CACHE_TTL_MS = 60_000;
+// Honor Retry-After on 429/503, but never sleep absurdly long inside a tool call.
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/** Response shape we read out of a `BrowseDealFeed` op. Loosely typed — the
+ *  tools that project deal cards own the field-level validation. */
+export interface BrowseDealFeed {
+  cards?: unknown[];
+  facets?: unknown[];
+  pagination?: unknown;
+  browseProps?: unknown;
+  [k: string]: unknown;
 }
 
-const BASE_URL = 'https://api.setlist.fm/rest';
-const SERVICE_NAME = 'setlist.fm';
-// Bound every request so a slow/hung upstream fails fast (createApiClient throws
-// RequestTimeoutError) instead of hanging the tool call. setlist.fm normally
-// answers in well under a second.
-const REQUEST_TIMEOUT_MS = 15_000;
+export interface GrouponClientOptions {
+  /** GraphQL endpoint; default GROUPON_GRAPHQL_URL or the production host. */
+  endpoint?: string;
+  fetchImpl?: typeof fetch;
+  cacheTtlMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
 
-/** Query params for a GET — undefined/null/empty members are dropped. */
-export type Query = Record<string, string | number | undefined>;
-
-export class SetlistClient {
-  private readonly apiKey: string | null;
+export class GrouponClient {
+  private readonly endpoint: string;
   private readonly configError: Error | null;
-  private readonly api: ApiClient;
+  private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly cache: ResponseCache;
 
   /**
-   * Defer the config error so the server can still start (and answer the host's
-   * install-time tools/list smoke test) when SETLIST_API_KEY isn't set yet.
-   * Tool calls re-raise the error at request time via {@link requireKey}.
-   *
-   * `opts.apiKey` is an optional constructor seam: a hosted, per-user deployment
-   * (e.g. the Cloudflare Worker connector) builds one client per request with
-   * that user's injected key instead of the process-wide env var. Left unset by
-   * the stdio path, which falls back to `SETLIST_API_KEY` exactly as before —
-   * keeping that behaviour byte-for-byte identical.
+   * Deal reads need no credential, so `configError` stays null and the server
+   * always boots. The requireReadable() gate is kept as the seam where a future
+   * write path (purchase / connector) would raise a deferred config error — same
+   * shape the rest of the fleet uses for keyed clients, so the pattern is ready
+   * when the write creds land.
    */
-  constructor(opts?: { apiKey?: string }) {
-    const key = opts?.apiKey ?? readEnvVar('SETLIST_API_KEY');
-    if (!key) {
-      this.apiKey = null;
-      this.configError = new Error('SETLIST_API_KEY environment variable is required');
-    } else {
-      this.apiKey = key;
-      this.configError = null;
+  constructor(opts: GrouponClientOptions = {}) {
+    const now = opts.now ?? Date.now;
+    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const cacheTtlMs = opts.cacheTtlMs ?? readTtlMsEnv('GROUPON_CACHE_TTL', DEFAULT_CACHE_TTL_MS);
+    this.cache = createResponseCache({ ttlMs: { dynamic: cacheTtlMs }, now });
+    this.endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
+    // Reads are unauthenticated: no config error to defer.
+    this.configError = null;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+  }
+
+  /** Gate kept for the future write path; a no-op for the read-only MVP. */
+  private requireReadable(): void {
+    if (this.configError) throw this.configError;
+  }
+
+  /**
+   * Search or browse Groupon deals for a division. Omit `query` for a plain
+   * category/city browse. Returns `data.browseDealFeed` from the first (and
+   * only) element of Groupon's batched response.
+   */
+  async browseDealFeed(args: BrowseDealFeedArgs): Promise<BrowseDealFeed> {
+    const op = buildBrowseDealFeed(args);
+    const cacheKey = `browseDealFeed ${JSON.stringify(args)}`;
+    const load = async (): Promise<BrowseDealFeed> => {
+      const batch = await this.request<BrowseDealFeedResponse[]>([op]);
+      const feed = batch?.[0]?.data?.browseDealFeed;
+      if (!feed) {
+        throw new McpToolError(`${SERVICE} returned no deal feed for this request.`, {
+          hint: 'Check the division slug (e.g. "new-york", "chicago") and try again. If this persists, Groupon may have changed its response shape.',
+        });
+      }
+      return feed;
+    };
+    return this.cache.fetchThrough(cacheKey, load, 'dynamic') as Promise<BrowseDealFeed>;
+  }
+
+  /**
+   * POST a batched array of persisted-query ops to the GraphQL endpoint. Retries
+   * once on 429/503 honoring Retry-After, detects a stale persisted hash, and
+   * refuses to blind-parse a non-JSON 2xx body (a bot/challenge interstitial).
+   */
+  private async request<T>(batch: unknown[]): Promise<T> {
+    this.requireReadable();
+    const method = 'POST';
+    const init: RequestInit = {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        'apollographql-client-name': CLIENT_NAME,
+      },
+      body: JSON.stringify(batch),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    };
+
+    let res = await this.fetchImpl(this.endpoint, init);
+    // Groupon signals throttling / transient unavailability with 429 / 503.
+    // Honor Retry-After once, capped so a tool call never sleeps unreasonably long.
+    if (res.status === 429 || res.status === 503) {
+      const delayMs = parseRetryAfterMs(res.headers.get('retry-after'), {
+        defaultMs: 1000,
+        capMs: MAX_RETRY_AFTER_MS,
+      });
+      await this.sleep(delayMs);
+      res = await this.fetchImpl(this.endpoint, init);
     }
 
-    // setlist.fm authenticates with an `x-api-key` header (not a Bearer token),
-    // attached per-request in `request()`. We localize city/country names via an
-    // optional `Accept-Language`. `Accept: application/json` is already the
-    // fetchJson default (the API serves XML otherwise).
-    const lang = readEnvVar('SETLIST_ACCEPT_LANGUAGE');
-    this.api = createApiClient({
-      baseUrl: BASE_URL,
-      serviceName: SERVICE_NAME,
-      retry: { count: 1, delayMs: 2000 },
-      baseHeaders: lang ? { 'Accept-Language': lang } : undefined,
-      timeout: REQUEST_TIMEOUT_MS,
-    });
-  }
+    const text = await res.text();
+    if (res.status === 429 || res.status === 503) {
+      throw new McpToolError(`${SERVICE} rate limit: still receiving ${res.status} after a retry.`, {
+        hint: 'Space out calls, or rely on the built-in response cache (GROUPON_CACHE_TTL).',
+      });
+    }
+    if (!res.ok) {
+      throw new McpToolError(formatApiError(res.status, method, this.endpoint, text, { service: SERVICE }), {
+        hint: 'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.',
+      });
+    }
 
-  private requireKey(): string {
-    if (this.configError) throw this.configError;
-    return this.apiKey!;
+    // A 2xx that isn't JSON is a bot/challenge interstitial — never JSON.parse blind.
+    let parsed: unknown;
+    try {
+      parsed = text.trim() ? JSON.parse(text) : undefined;
+    } catch {
+      throw new McpToolError(`${SERVICE} returned a non-JSON ${res.status} response (likely a bot/challenge interstitial).`, {
+        hint: 'Groupon may be rate-limiting or challenging this client. Retry shortly; if it persists, the request may need to originate from a different network.',
+      });
+    }
+
+    this.assertNoPersistedQueryError(parsed);
+    return parsed as T;
   }
 
   /**
-   * Issue a request with the `x-api-key` header attached. `requireKey()` runs
-   * here (not in the constructor) so a missing key surfaces at request time,
-   * keeping the deferred-config-error pattern intact.
+   * A stale persisted-query hash comes back as `{ errors: [{ message:
+   * 'PersistedQueryNotFound' }] }` — either as the top-level response or inside a
+   * batched element. Surface it as an actionable error rather than letting the
+   * caller trip over a missing `data`.
    */
-  async request<T>(
-    method: string,
-    path: string,
-    opts: { query?: Query; body?: unknown } = {},
-  ): Promise<T> {
-    const apiKey = this.requireKey();
-    const data = await this.api.fetchJson<T>(method, path, {
-      headers: { 'x-api-key': apiKey },
-      ...(opts.query !== undefined ? { query: opts.query } : {}),
-      ...(opts.body !== undefined ? { body: opts.body } : {}),
-    });
-    // Surface every date as ISO yyyy-MM-dd (the API returns eventDate as dd-MM-yyyy),
-    // and annotate setlists with songCount/setCount/hasSongs so stubs are visible.
-    return augmentSetlists(deepMapStringField(data, 'eventDate', dmyToIso));
+  private assertNoPersistedQueryError(parsed: unknown): void {
+    const elements = Array.isArray(parsed) ? parsed : [parsed];
+    for (const el of elements) {
+      const errors = (el as { errors?: Array<{ message?: string }> } | null)?.errors;
+      if (Array.isArray(errors) && errors.some((e) => e?.message === 'PersistedQueryNotFound')) {
+        throw new McpToolError(
+          'Groupon persisted query is stale; the sha256Hash in graphql-ops.ts must be re-captured.',
+          {
+            hint: 'Groupon redeployed its GraphQL schema. Re-capture the BrowseDealFeed persisted-query hash from a live groupon.com search (the request body\'s extensions.persistedQuery.sha256Hash) and update BROWSE_DEAL_FEED_HASH in src/graphql-ops.ts.',
+          },
+        );
+      }
+    }
   }
+}
+
+/** Shape of one batched-response element for a BrowseDealFeed op. */
+interface BrowseDealFeedResponse {
+  data?: { browseDealFeed?: BrowseDealFeed };
+  errors?: Array<{ message?: string }>;
 }
 
 /**
- * Module-level singleton shared by every tool module. Constructing it here (not
- * in `index.ts`) keeps the deferred-config-error pattern: the server boots and
- * answers the host's install-time tools/list smoke test even when the API key
- * is absent — the error only surfaces on the first request.
+ * Module-level singleton shared by every tool module. Constructed here (not in
+ * index.ts) so the server boots and lists tools with no configuration — reads
+ * are unauthenticated.
  */
-export const client = new SetlistClient();
+export const client = new GrouponClient();

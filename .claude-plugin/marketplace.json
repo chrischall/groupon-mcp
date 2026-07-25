@@ -1,34 +1,34 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "setlist-mcp",
+  "name": "groupon-mcp",
   "owner": {
     "name": "Chris Hall",
     "email": "chris.c.hall@gmail.com"
   },
   "metadata": {
-    "description": "MCP server for setlist.fm — concert setlists, artists, venues, and tours via the setlist.fm API",
-    "version": "0.9.2"
+    "description": "MCP server for Groupon — local, goods, and travel deals via natural language",
+    "version": "0.0.0"
   },
   "plugins": [
     {
-      "name": "setlist-mcp",
-      "displayName": "setlist.fm",
+      "name": "groupon-mcp",
+      "displayName": "Groupon",
       "source": "./",
-      "description": "MCP server for setlist.fm — search concert setlists, artists, venues, and tours via natural language",
-      "version": "0.9.2",
+      "description": "MCP server for Groupon — search and browse local, goods, and travel deals via natural language",
+      "version": "0.0.0",
       "author": {
         "name": "Chris Hall"
       },
-      "homepage": "https://github.com/chrischall/setlist-mcp",
-      "repository": "https://github.com/chrischall/setlist-mcp",
+      "homepage": "https://github.com/chrischall/groupon-mcp",
+      "repository": "https://github.com/chrischall/groupon-mcp",
       "license": "MIT",
       "keywords": [
-        "setlist.fm",
-        "setlists",
-        "concerts",
+        "groupon",
+        "deals",
+        "coupons",
         "mcp"
       ],
-      "category": "music"
+      "category": "shopping"
     }
   ]
 }
