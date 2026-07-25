@@ -4,6 +4,7 @@ import { VERSION } from './version.js';
 import { client } from './client.js';
 import { registerHealthcheckTools } from './tools/healthcheck.js';
 import { registerDealTools } from './tools/deals.js';
+import { registerDetailTools } from './tools/detail.js';
 
 // Read-path MVP. This phase establishes the Groupon identity and a minimal,
 // read-only stdio MCP server: a dependency-free healthcheck plus the deal
@@ -14,5 +15,9 @@ await runMcp({
   version: VERSION,
   banner:
     '[groupon-mcp] This project was developed and is maintained by AI. Use at your own discretion.',
-  tools: [registerHealthcheckTools, (server) => registerDealTools(server, client)],
+  tools: [
+    registerHealthcheckTools,
+    (server) => registerDealTools(server, client),
+    (server) => registerDetailTools(server, client),
+  ],
 });

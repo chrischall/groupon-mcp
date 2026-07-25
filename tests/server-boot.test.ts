@@ -86,9 +86,11 @@ describe('server boot (built artifacts)', () => {
     try {
       copyFileSync(BUNDLE, join(dir, 'bundle.js'));
       const tools = await listToolsViaStdio(join(dir, 'bundle.js'), dir);
-      expect(tools.length).toBeGreaterThanOrEqual(1);
+      expect(tools.length).toBeGreaterThanOrEqual(3);
       expect(tools).toContain('groupon_healthcheck');
       expect(tools).toContain('groupon_search_deals');
+      expect(tools).toContain('groupon_get_deal');
+      expect(tools).toContain('groupon_list_categories');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -96,8 +98,10 @@ describe('server boot (built artifacts)', () => {
 
   it('npm bin (dist/index.js) boots with node_modules and lists tools', async () => {
     const tools = await listToolsViaStdio(BIN, ROOT);
-    expect(tools.length).toBeGreaterThanOrEqual(1);
+    expect(tools.length).toBeGreaterThanOrEqual(3);
     expect(tools).toContain('groupon_healthcheck');
     expect(tools).toContain('groupon_search_deals');
+    expect(tools).toContain('groupon_get_deal');
+    expect(tools).toContain('groupon_list_categories');
   }, 30_000);
 });

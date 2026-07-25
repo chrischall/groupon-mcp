@@ -10,7 +10,13 @@ import {
   McpToolError,
   type ResponseCache,
 } from '@chrischall/mcp-utils';
-import { buildBrowseDealFeed, type BrowseDealFeedArgs } from './graphql-ops.js';
+import {
+  buildBrowseDealFeed,
+  buildGetDeal,
+  buildMainNavigation,
+  type BrowseDealFeedArgs,
+  type GetDealArgs,
+} from './graphql-ops.js';
 
 // Load .env for local dev; silently skip if dotenv is unavailable (e.g. the
 // .mcpb bundle). loadDotenvSafely never lets .env override a host-provided value.
@@ -41,6 +47,24 @@ export interface BrowseDealFeed {
   facets?: unknown[];
   pagination?: unknown;
   browseProps?: unknown;
+  [k: string]: unknown;
+}
+
+/** Response shape we read out of a `getDeal` op. Loosely typed — the tools that
+ *  project the deal own the field-level validation. */
+export interface GetDeal {
+  title?: unknown;
+  subtitle?: unknown;
+  options?: unknown;
+  price?: unknown;
+  merchant?: unknown;
+  division?: unknown;
+  [k: string]: unknown;
+}
+
+/** Response shape we read out of a `GetMainNavigation` op — the category
+ *  taxonomy payload. Loosely typed — the tools own the field-level validation. */
+export interface MainNavigation {
   [k: string]: unknown;
 }
 
@@ -102,6 +126,46 @@ export class GrouponClient {
       return feed;
     };
     return this.cache.fetchThrough(cacheKey, load, 'dynamic') as Promise<BrowseDealFeed>;
+  }
+
+  /**
+   * Fetch a single deal's detail by permalink slug. Works even though the
+   * `/deals/<slug>` PAGE 403s server-side. Returns `data.getDeal` from the first
+   * (and only) element of Groupon's batched response.
+   */
+  async getDeal(args: GetDealArgs): Promise<GetDeal> {
+    const op = buildGetDeal(args);
+    const cacheKey = `getDeal ${JSON.stringify(args)}`;
+    const load = async (): Promise<GetDeal> => {
+      const batch = await this.request<GetDealResponse[]>([op]);
+      const deal = batch?.[0]?.data?.getDeal;
+      if (!deal) {
+        throw new McpToolError(`${SERVICE} returned no deal for this request.`, {
+          hint: 'Check the dealId slug (the last path segment of a deal URL, e.g. "enset-productions-and-ventures-3"). If this persists, Groupon may have changed its response shape.',
+        });
+      }
+      return deal;
+    };
+    return this.cache.fetchThrough(cacheKey, load, 'dynamic') as Promise<GetDeal>;
+  }
+
+  /**
+   * Fetch Groupon's category taxonomy tree. Returns `data` from the first (and
+   * only) element of Groupon's batched response.
+   */
+  async getMainNavigation(): Promise<MainNavigation> {
+    const cacheKey = 'getMainNavigation';
+    const load = async (): Promise<MainNavigation> => {
+      const batch = await this.request<MainNavigationResponse[]>([buildMainNavigation()]);
+      const nav = batch?.[0]?.data;
+      if (!nav) {
+        throw new McpToolError(`${SERVICE} returned no navigation payload.`, {
+          hint: 'If this persists, Groupon may have changed its response shape or the persisted-query hash in graphql-ops.ts may need re-capture.',
+        });
+      }
+      return nav;
+    };
+    return this.cache.fetchThrough(cacheKey, load, 'dynamic') as Promise<MainNavigation>;
   }
 
   /**
@@ -185,6 +249,18 @@ export class GrouponClient {
 /** Shape of one batched-response element for a BrowseDealFeed op. */
 interface BrowseDealFeedResponse {
   data?: { browseDealFeed?: BrowseDealFeed };
+  errors?: Array<{ message?: string }>;
+}
+
+/** Shape of one batched-response element for a getDeal op. */
+interface GetDealResponse {
+  data?: { getDeal?: GetDeal };
+  errors?: Array<{ message?: string }>;
+}
+
+/** Shape of one batched-response element for a GetMainNavigation op. */
+interface MainNavigationResponse {
+  data?: MainNavigation;
   errors?: Array<{ message?: string }>;
 }
 
