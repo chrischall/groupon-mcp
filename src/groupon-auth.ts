@@ -5,10 +5,10 @@ import { GrouponClient } from './client.js';
  * OAuth props stored per user by the Cloudflare connector's OAuth provider.
  *
  * Groupon's deal reads hit an ANONYMOUS consumer GraphQL endpoint — no API key,
- * no account, no cookie. So unlike the setlist.fm connector (which stores the
- * user's own `x-api-key`) or the OFW connector (which stores login credentials),
- * there is nothing secret to persist here: the props are empty. `worker.ts`'s
- * `buildClient` ignores them and constructs a credential-free `GrouponClient`.
+ * no account, no cookie. So unlike connectors that persist a user's API key or
+ * login credentials, there is nothing secret to store here: the props are empty.
+ * `worker.ts`'s `buildClient` ignores them and constructs a credential-free
+ * `GrouponClient`.
  *
  * The index signature satisfies `createConnector`'s
  * `Props extends Record<string, unknown>` constraint while carrying no fields.
