@@ -85,17 +85,33 @@ export function collectCartOptionIds(cart: unknown): string[] {
 
 /**
  * Is a given optionId present in the cart? Primary signal is an `optionId` field
- * match; the JSON-stringify fallback catches a cart that carries the id under a
- * differently-named field (optionIds are specific UUID-like values, so a
- * substring hit is a strong signal).
+ * match; the fallback catches a cart that carries the id under a
+ * differently-named field.
+ *
+ * The fallback compares VALUES, not the serialized document. `JSON.stringify()
+ * .includes(optionId)` also matches the id as a substring of a longer id, or
+ * inside a checkout URL, a tracking blob, or a "recently viewed" list — none of
+ * which mean the item is in the cart. That answer reaches the caller as
+ * `verified: true`, i.e. "we re-read the cart and confirmed it landed", so a
+ * false positive states the opposite of the truth about a purchase.
  */
 function cartContainsOptionId(cart: unknown, optionId: string): boolean {
   if (collectCartOptionIds(cart).includes(optionId)) return true;
-  try {
-    return JSON.stringify(cart)?.includes(optionId) ?? false;
-  } catch {
-    return false;
-  }
+  return cartHasValue(cart, optionId);
+}
+
+/** True when any string value anywhere in `node` equals `target` exactly. */
+function cartHasValue(node: unknown, target: string): boolean {
+  const seen = new Set<object>();
+  const walk = (n: unknown): boolean => {
+    if (typeof n === 'string') return n === target;
+    if (n === null || typeof n !== 'object') return false;
+    if (seen.has(n as object)) return false;   // cyclic payloads must terminate
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    return Object.values(n as Record<string, unknown>).some(walk);
+  };
+  return walk(node);
 }
 
 /** The ids + display fields resolved from a getDeal read for a cart add. */

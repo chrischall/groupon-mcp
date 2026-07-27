@@ -183,6 +183,30 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
+  it('does not report verified when the id only appears as a substring', async () => {
+    // The old fallback stringified the whole cart and substring-matched, so an
+    // unrelated longer id — or the id echoed in the checkout URL — read as
+    // "the item is in the cart".
+    const cartAfter = {
+      items: [{ optionId: 'opt-b-legacy-variant' }],
+      checkoutUrl: 'https://www.groupon.com/checkout/cart?last=opt-b',
+    };
+    const { webClient, readClient } = makeClients({
+      getCart: vi.fn().mockResolvedValue(cartAfter),
+    });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      confirm: true,
+    });
+
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data.verified).toBe(false);
+    await h.close();
+  });
+
   it('CONFIRM: reports verified=false when the re-read does not show the item', async () => {
     const { webClient, readClient } = makeClients({ getCart: vi.fn().mockResolvedValue({ items: [] }) });
     const h = await harness(webClient, readClient);
