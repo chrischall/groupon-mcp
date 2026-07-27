@@ -7,7 +7,7 @@
   },
   "metadata": {
     "description": "MCP server for Groupon — local, goods, and travel deals via natural language",
-    "version": "0.0.0"
+    "version": "0.1.0"
   },
   "plugins": [
     {
@@ -15,7 +15,7 @@
       "displayName": "Groupon",
       "source": "./",
       "description": "MCP server for Groupon — search and browse local, goods, and travel deals via natural language",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "author": {
         "name": "Chris Hall"
       },
