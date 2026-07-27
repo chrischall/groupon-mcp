@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/chrischall/groupon-mcp/compare/v0.1.0...v0.1.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **cart:** match option ids by value, not by substring of the whole cart ([#9](https://github.com/chrischall/groupon-mcp/issues/9)) ([d53bd9f](https://github.com/chrischall/groupon-mcp/commit/d53bd9fe6c36a2cd0a2a61b9e62b49a1c769c305))
+
 ## 0.1.0 (2026-07-27)
 
 
