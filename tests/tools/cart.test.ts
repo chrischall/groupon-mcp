@@ -183,6 +183,56 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
+  it('reports verified when the id is present under a differently-named field', async () => {
+    // The fallback's whole reason to exist: Groupon does not always echo the id
+    // back under `optionId`. Without this, the negative test below is satisfied
+    // by deleting the fallback outright — the suite would stay green while
+    // every legitimately-added item started reporting verified: false.
+    const cartAfter = {
+      items: [{ variantId: 'opt-b', quantity: 1 }],
+      checkoutUrl: 'https://www.groupon.com/checkout/cart',
+    };
+    const { webClient, readClient } = makeClients({
+      getCart: vi.fn().mockResolvedValue(cartAfter),
+    });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      confirm: true,
+    });
+
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data.verified).toBe(true);
+    await h.close();
+  });
+
+  it('finds a nested, differently-named id without matching a longer sibling', async () => {
+    // Exact-value matching, not substring: the walk descends into nested
+    // objects and arrays, and the sibling that merely STARTS with the id must
+    // not satisfy it.
+    const cartAfter = {
+      items: [
+        { sku: 'opt-b-legacy-variant' },
+        { detail: { selection: { chosenOption: 'opt-b' } } },
+      ],
+    };
+    const { webClient, readClient } = makeClients({
+      getCart: vi.fn().mockResolvedValue(cartAfter),
+    });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      confirm: true,
+    });
+
+    expect(parseToolResult<Record<string, unknown>>(res).verified).toBe(true);
+    await h.close();
+  });
+
   it('does not report verified when the id only appears as a substring', async () => {
     // The old fallback stringified the whole cart and substring-matched, so an
     // unrelated longer id — or the id echoed in the checkout URL — read as
