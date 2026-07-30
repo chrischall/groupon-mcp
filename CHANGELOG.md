@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/chrischall/groupon-mcp/compare/v0.1.1...v0.1.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* **deps:** bump @fetchproxy/* to 1.7.0 and @chrischall/mcp-utils to 0.14.0 ([#13](https://github.com/chrischall/groupon-mcp/issues/13)) ([ac97260](https://github.com/chrischall/groupon-mcp/commit/ac9726025a3891c24fcd43f95ee3e2aead618bf0))
+
 ## [0.1.1](https://github.com/chrischall/groupon-mcp/compare/v0.1.0...v0.1.1) (2026-07-27)
 
 
