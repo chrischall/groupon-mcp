@@ -73,12 +73,19 @@ export interface GrouponWebClientOptions {
  */
 export class GrouponWebClient {
   private cookie: string | null;
+  /**
+   * Where `cookie` came from. Only a browser-lifted cookie can be renewed —
+   * an env-supplied `GROUPON_SESSION_COOKIE` is static, so re-lifting on its
+   * behalf would burn a bridge round-trip to produce the same dead value.
+   */
+  private cookieSource: 'env' | 'lift' | null;
   private readonly endpoint: string;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(opts: GrouponWebClientOptions = {}) {
     this.cookie = opts.cookie ?? readEnvVar('GROUPON_SESSION_COOKIE') ?? null;
+    this.cookieSource = this.cookie ? 'env' : null;
     this.endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -98,7 +105,24 @@ export class GrouponWebClient {
     const { resolveSessionCookie } = await import('./fetchproxy-cookie.js');
     const { cookieHeader } = await resolveSessionCookie();
     this.cookie = cookieHeader;
+    this.cookieSource = 'lift';
     return cookieHeader;
+  }
+
+  /**
+   * Drop a lifted cookie so the next `requireCookie()` re-reads the browser.
+   *
+   * Without this the cached cookie outlived the session it represented: the
+   * first expiry wedged the client for the life of the process, since every
+   * later call replayed the same dead value. Returns false when there is
+   * nothing worth re-lifting (env-supplied or never resolved), so callers can
+   * skip a pointless retry.
+   */
+  private invalidateLiftedCookie(): boolean {
+    if (this.cookieSource !== 'lift') return false;
+    this.cookie = null;
+    this.cookieSource = null;
+    return true;
   }
 
   /** Read the signed-in user's cart. Throws {@link SessionExpiredError} when the
@@ -136,10 +160,8 @@ export class GrouponWebClient {
    * persisted hash, and refuses to blind-parse a non-JSON 2xx body.
    */
   private async request<T>(op: PersistedQueryOp, operationName: string): Promise<T> {
-    const cookie = await this.requireCookie();
-    const method = 'POST';
-    const init: RequestInit = {
-      method,
+    const buildInit = (cookie: string): RequestInit => ({
+      method: 'POST',
       headers: {
         'content-type': 'application/json',
         'apollographql-client-name': CLIENT_NAME,
@@ -148,11 +170,21 @@ export class GrouponWebClient {
       },
       body: JSON.stringify([op]),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    };
+    });
 
+    let init = buildInit(await this.requireCookie());
     let res = await this.fetchImpl(this.endpoint, init);
-    // A logged-out / expired session is rejected outright.
-    if (res.status === 401 || res.status === 403) throw new SessionExpiredError();
+
+    // A logged-out / expired session. When the cookie came from the browser
+    // it is worth exactly one re-lift: the tab usually still holds a live
+    // session, and the stale copy is only stale because we cached it. Env
+    // cookies are static, so they fail fast instead.
+    if (res.status === 401 || res.status === 403) {
+      if (!this.invalidateLiftedCookie()) throw new SessionExpiredError();
+      init = buildInit(await this.requireCookie());
+      res = await this.fetchImpl(this.endpoint, init);
+      if (res.status === 401 || res.status === 403) throw new SessionExpiredError();
+    }
     // Honor Retry-After once on throttling / transient unavailability.
     if (res.status === 429 || res.status === 503) {
       const delayMs = parseRetryAfterMs(res.headers.get('retry-after'), {
@@ -171,7 +203,7 @@ export class GrouponWebClient {
       });
     }
     if (!res.ok) {
-      throw new McpToolError(formatApiError(res.status, method, this.endpoint, text, { service: SERVICE }), {
+      throw new McpToolError(formatApiError(res.status, 'POST', this.endpoint, text, { service: SERVICE }), {
         hint: 'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.',
       });
     }
