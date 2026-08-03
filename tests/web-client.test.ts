@@ -160,3 +160,89 @@ describe('GrouponWebClient', () => {
     expect(cart).toEqual({ items: [], __typename: 'Cart' });
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Re-lifting an expired browser session
+// ────────────────────────────────────────────────────────────────────────────
+//
+// The fetchproxy cookie was resolved once and cached on the instance "for the
+// process", and SessionExpiredError never cleared it. So the first expiry
+// wedged the client permanently: every later call replayed the same dead
+// cookie and threw again, with no recovery path even in principle — while the
+// browser still held a live session the whole time.
+//
+// An env-supplied GROUPON_SESSION_COOKIE is static, so re-lifting cannot help
+// there and must NOT be attempted; that case still fails fast.
+describe('GrouponWebClient — expired browser session', () => {
+  afterEach(() => {
+    vi.resetModules();
+    delete process.env.GROUPON_SESSION_COOKIE;
+  });
+
+  /** Client with no injected cookie, so it resolves via the (mocked) lift. */
+  function liftClient(fetchImpl: typeof fetch) {
+    return new GrouponWebClient({ fetchImpl, sleep: async () => {} });
+  }
+
+  function mockLift(...cookies: string[]) {
+    let i = 0;
+    const resolveSessionCookie = vi.fn(async () => ({
+      cookieHeader: cookies[Math.min(i++, cookies.length - 1)]!,
+    }));
+    vi.doMock('../src/fetchproxy-cookie.js', () => ({ resolveSessionCookie }));
+    return resolveSessionCookie;
+  }
+
+  it('re-lifts and replays once when a lifted cookie has expired', async () => {
+    const lift = mockLift('session=stale', 'session=fresh');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(401, { error: 'unauthorized' }))
+      .mockResolvedValueOnce(cartRes());
+    const client = liftClient(fetchImpl as unknown as typeof fetch);
+
+    await expect(client.getCart()).resolves.toBeDefined();
+    expect(lift).toHaveBeenCalledTimes(2);
+    const retryCookie = (fetchImpl.mock.calls[1]![1] as RequestInit).headers as Record<string, string>;
+    expect(retryCookie.Cookie).toBe('session=fresh');
+  });
+
+  it('gives up after ONE re-lift — a genuinely dead browser session still throws', async () => {
+    const lift = mockLift('session=dead');
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: 'unauthorized' }));
+    const client = liftClient(fetchImpl as unknown as typeof fetch);
+
+    await expect(client.getCart()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(lift).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT re-lift an env-supplied cookie — it is static, so a retry is pointless', async () => {
+    const lift = mockLift('session=from-bridge');
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(403, { error: 'forbidden' }));
+    const client = new GrouponWebClient({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      cookie: 'session=from-env',
+      sleep: async () => {},
+    });
+
+    await expect(client.getCart()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(lift).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers on a later call after an expiry, without a restart', async () => {
+    // The property the old cache destroyed: a client that failed once must be
+    // usable again once the user signs back in.
+    const lift = mockLift('session=dead', 'session=dead', 'session=alive');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(401, {}))
+      .mockResolvedValueOnce(jsonRes(401, {}))
+      .mockResolvedValueOnce(cartRes());
+    const client = liftClient(fetchImpl as unknown as typeof fetch);
+
+    await expect(client.getCart()).rejects.toBeInstanceOf(SessionExpiredError);
+    await expect(client.getCart()).resolves.toBeDefined();
+  });
+});
