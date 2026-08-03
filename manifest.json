@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "groupon-mcp",
   "display_name": "Groupon",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Groupon deals for Claude — search and browse local, goods, and travel deals via natural language",
   "author": {
     "name": "Chris Chall",
