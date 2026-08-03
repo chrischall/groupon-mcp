@@ -188,7 +188,7 @@ export class GrouponWebClient {
     // one. Handling only the first meant an expiry that happened to surface
     // after a 429 bypassed the re-lift and wedged the client exactly as before.
     let relifted = false;
-    const settleAuthFailure = async (current: Response): Promise<Response> => {
+    const settleAuthFailure = async (): Promise<Response> => {
       if (relifted || !this.invalidateLiftedCookie()) throw new SessionExpiredError();
       relifted = true;
       init = buildInit(await this.requireCookie());
@@ -201,12 +201,11 @@ export class GrouponWebClient {
         this.invalidateLiftedCookie();
         throw new SessionExpiredError();
       }
-      void current;
       return replayed;
     };
 
     if (res.status === 401 || res.status === 403) {
-      res = await settleAuthFailure(res);
+      res = await settleAuthFailure();
     }
     // Honor Retry-After once on throttling / transient unavailability.
     if (res.status === 429 || res.status === 503) {
@@ -217,7 +216,7 @@ export class GrouponWebClient {
       await this.sleep(delayMs);
       res = await this.fetchImpl(this.endpoint, init);
       if (res.status === 401 || res.status === 403) {
-        res = await settleAuthFailure(res);
+        res = await settleAuthFailure();
       }
     }
 
