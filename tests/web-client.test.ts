@@ -217,6 +217,38 @@ describe('GrouponWebClient — expired browser session', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('re-lifts when the 401 arrives on the post-429 retry', async () => {
+    // The throttle path had its own 401/403 check that threw directly,
+    // bypassing the re-lift entirely — so an expiry that happened to surface
+    // after a Retry-After wedged the client exactly as before.
+    const lift = mockLift('session=stale', 'session=fresh');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(429, {}, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonRes(401, { error: 'unauthorized' }))
+      .mockResolvedValueOnce(cartRes());
+    const client = liftClient(fetchImpl as unknown as typeof fetch);
+
+    await expect(client.getCart()).resolves.toBeDefined();
+    expect(lift).toHaveBeenCalledTimes(2);
+    const retry = (fetchImpl.mock.calls[2]![1] as RequestInit).headers as Record<string, string>;
+    expect(retry.Cookie).toBe('session=fresh');
+  });
+
+  it('re-lifts at most once per request across both 401 checks', async () => {
+    const lift = mockLift('session=a', 'session=b', 'session=c');
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(401, {}))
+      .mockResolvedValueOnce(jsonRes(429, {}, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonRes(401, {}));
+    const client = liftClient(fetchImpl as unknown as typeof fetch);
+
+    await expect(client.getCart()).rejects.toBeInstanceOf(SessionExpiredError);
+    // One initial resolve + exactly one re-lift — not one per 401 site.
+    expect(lift).toHaveBeenCalledTimes(2);
+  });
+
   it('does NOT re-lift an env-supplied cookie — it is static, so a retry is pointless', async () => {
     const lift = mockLift('session=from-bridge');
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(403, { error: 'forbidden' }));
@@ -244,5 +276,10 @@ describe('GrouponWebClient — expired browser session', () => {
 
     await expect(client.getCart()).rejects.toBeInstanceOf(SessionExpiredError);
     await expect(client.getCart()).resolves.toBeDefined();
+    // The recovery must ride a NEWLY lifted cookie — asserting only the call
+    // count would pass even if the dead value were replayed.
+    expect(lift).toHaveBeenCalledTimes(3);
+    const recovered = (fetchImpl.mock.calls[2]![1] as RequestInit).headers as Record<string, string>;
+    expect(recovered.Cookie).toBe('session=alive');
   });
 });
