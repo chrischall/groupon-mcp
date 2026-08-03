@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3](https://github.com/chrischall/groupon-mcp/compare/v0.1.2...v0.1.3) (2026-08-03)
+
+
+### Bug Fixes
+
+* **web-client:** re-lift an expired browser session instead of wedging ([#18](https://github.com/chrischall/groupon-mcp/issues/18)) ([5b3a241](https://github.com/chrischall/groupon-mcp/commit/5b3a241d90188fe14d1e9754ca3b7d698f01d35a))
+* **web-client:** re-lift on the post-429 401 and drop a dead cookie ([#21](https://github.com/chrischall/groupon-mcp/issues/21)) ([5f2977d](https://github.com/chrischall/groupon-mcp/commit/5f2977d4e3ed513d8dc046cc9b6b9acc0e6ea142)), closes [#19](https://github.com/chrischall/groupon-mcp/issues/19)
+
+
+### Refactor
+
+* **web-client:** drop the unused settleAuthFailure parameter ([#23](https://github.com/chrischall/groupon-mcp/issues/23)) ([9ddb138](https://github.com/chrischall/groupon-mcp/commit/9ddb138a66d71745c2a43b120b90a05c481bb765)), closes [#22](https://github.com/chrischall/groupon-mcp/issues/22)
+
 ## [0.1.2](https://github.com/chrischall/groupon-mcp/compare/v0.1.1...v0.1.2) (2026-07-30)
 
 
