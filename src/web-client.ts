@@ -97,8 +97,12 @@ export class GrouponWebClient {
    * fetchproxy-cookie.ts — a one-time fetchproxy `Cookie`-header grab from the
    * signed-in tab (lazy-imported so the env path never loads the bridge, keeping
    * `@fetchproxy/*` out of the eager module graph). The resolver throws an
-   * actionable, deferred config error when nothing is configured. The resolved
-   * cookie is cached on the instance for the process.
+   * actionable, deferred config error when nothing is configured.
+   *
+   * The resolved cookie is cached on the instance, but a browser-lifted one is
+   * dropped by {@link invalidateLiftedCookie} on a 401/403 so the next call
+   * re-reads the tab — it is cached until it stops working, not for the life
+   * of the process. An env-supplied cookie is static and never re-resolved.
    */
   private async requireCookie(): Promise<string> {
     if (this.cookie) return this.cookie;
@@ -175,15 +179,34 @@ export class GrouponWebClient {
     let init = buildInit(await this.requireCookie());
     let res = await this.fetchImpl(this.endpoint, init);
 
-    // A logged-out / expired session. When the cookie came from the browser
-    // it is worth exactly one re-lift: the tab usually still holds a live
-    // session, and the stale copy is only stale because we cached it. Env
-    // cookies are static, so they fail fast instead.
-    if (res.status === 401 || res.status === 403) {
-      if (!this.invalidateLiftedCookie()) throw new SessionExpiredError();
+    // A logged-out / expired session. When the cookie came from the browser it
+    // is worth exactly one re-lift per request: the tab usually still holds a
+    // live session, and the copy we cached is only stale because we cached it.
+    // Env cookies are static, so they fail fast instead.
+    //
+    // Shared by BOTH 401 checks — the initial response and the post-Retry-After
+    // one. Handling only the first meant an expiry that happened to surface
+    // after a 429 bypassed the re-lift and wedged the client exactly as before.
+    let relifted = false;
+    const settleAuthFailure = async (current: Response): Promise<Response> => {
+      if (relifted || !this.invalidateLiftedCookie()) throw new SessionExpiredError();
+      relifted = true;
       init = buildInit(await this.requireCookie());
-      res = await this.fetchImpl(this.endpoint, init);
-      if (res.status === 401 || res.status === 403) throw new SessionExpiredError();
+      const replayed = await this.fetchImpl(this.endpoint, init);
+      if (replayed.status === 401 || replayed.status === 403) {
+        // The re-lifted cookie is dead too — the user is signed out in the
+        // browser. Drop it on the way out so the NEXT call re-reads the tab
+        // instead of inheriting a value we already know is dead; otherwise
+        // "sign back in and retry" would still be a lie.
+        this.invalidateLiftedCookie();
+        throw new SessionExpiredError();
+      }
+      void current;
+      return replayed;
+    };
+
+    if (res.status === 401 || res.status === 403) {
+      res = await settleAuthFailure(res);
     }
     // Honor Retry-After once on throttling / transient unavailability.
     if (res.status === 429 || res.status === 503) {
@@ -193,7 +216,9 @@ export class GrouponWebClient {
       });
       await this.sleep(delayMs);
       res = await this.fetchImpl(this.endpoint, init);
-      if (res.status === 401 || res.status === 403) throw new SessionExpiredError();
+      if (res.status === 401 || res.status === 403) {
+        res = await settleAuthFailure(res);
+      }
     }
 
     const text = await res.text();
