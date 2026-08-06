@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/chrischall/groupon-mcp/compare/v0.1.3...v0.1.4) (2026-08-06)
+
+
+### Bug Fixes
+
+* **deps:** move to @fetchproxy/server 2.0.0 for the v3 handshake ([#27](https://github.com/chrischall/groupon-mcp/issues/27)) ([0645f0c](https://github.com/chrischall/groupon-mcp/commit/0645f0cf361d2937cb3e6d12c499f2e685a9c96e))
+
 ## [0.1.3](https://github.com/chrischall/groupon-mcp/compare/v0.1.2...v0.1.3) (2026-08-03)
 
 
