@@ -2,7 +2,7 @@
   "name": "groupon-mcp",
   "version": "0.1.4",
   "mcpName": "io.github.chrischall/groupon-mcp",
-  "description": "Groupon MCP server for Claude — developed and maintained by AI (Claude Code)",
+  "description": "Groupon MCP server for Claude \u2014 developed and maintained by AI (Claude Code)",
   "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
   "repository": {
     "type": "git",
@@ -37,13 +37,9 @@
     "dev": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "worker:dev": "wrangler dev",
-    "worker:deploy": "wrangler deploy",
-    "worker:test": "vitest run --config vitest.workers.config.ts"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@chrischall/mcp-connector": "^1.0.0",
     "@chrischall/mcp-utils": "^0.14.0",
     "@fetchproxy/bootstrap": "^2.0.0",
     "@fetchproxy/server": "^2.0.0",
@@ -52,15 +48,10 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.19.0",
-    "@cloudflare/workers-oauth-provider": "^0.8.1",
-    "@cloudflare/workers-types": "^5.20260726.1",
     "@types/node": "^26.0.0",
     "@vitest/coverage-v8": "^4.1.2",
-    "agents": "^0.19.0",
     "esbuild": "^0.28.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.2",
-    "wrangler": "^4.110.0"
+    "vitest": "^4.1.2"
   }
 }

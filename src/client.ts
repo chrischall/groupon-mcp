@@ -21,16 +21,15 @@ import {
 // Load .env for local dev; silently skip if dotenv is unavailable (e.g. the
 // .mcpb bundle). loadDotenvSafely never lets .env override a host-provided value.
 //
-// Wrapped in try/catch because this module is also imported by the Cloudflare
-// Worker connector (src/worker.ts → src/client.ts). In the deployed Worker
+// Wrapped in try/catch because a non-Node runtime may reach this module. There
 // `import.meta.url` is undefined, so `fileURLToPath(import.meta.url)` throws at
-// module-eval time — which would crash Worker startup before any request runs.
+// module-eval time — which would crash startup before any request runs.
 // Deal reads need no config, so swallowing the failure is correct everywhere.
 try {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   await loadDotenvSafely({ path: join(__dirname, '..', '.env'), override: false });
 } catch {
-  // No filesystem/.env in this environment (Worker or bundle): reads are
+  // No filesystem/.env in this environment (e.g. a bundle): reads are
   // unauthenticated, so there is nothing to load.
 }
 

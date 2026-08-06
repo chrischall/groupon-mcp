@@ -192,7 +192,7 @@ export function resolveCartItem(deal: GetDeal, requestedOptionId?: string): Reso
  * `webClient` for the cart ops, and the anonymous read `readClient` for the
  * getDeal id-resolution that groupon_purchase needs. This module (and the whole
  * web-client / fetchproxy-cookie tree it pulls in) must NEVER be imported by
- * src/worker.ts — the hosted connector stays read-only.
+ * a read-only deployment, which registers no cart tools.
  */
 export function registerCartTools(
   server: McpServer,

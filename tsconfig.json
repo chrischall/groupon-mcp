@@ -11,9 +11,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  // `src/worker.ts` is the Cloudflare Worker connector entrypoint. It imports
-  // `agents` / `@chrischall/mcp-connector` (which resolve `cloudflare:workers`,
-  // unavailable to the Node `tsc` build) and is bundled by wrangler, not tsc.
-  // Excluding it keeps the stdio build from emitting `dist/worker.js`.
-  "exclude": ["node_modules", "dist", "src/worker.ts"]
+  "exclude": ["node_modules", "dist"]
 }
