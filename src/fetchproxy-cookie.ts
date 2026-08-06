@@ -20,7 +20,7 @@
 // This module is lazy-imported by web-client.ts, so the env path there never
 // loads the bridge; `@fetchproxy/bootstrap` (and, transitively,
 // `@fetchproxy/server` via the `/fetchproxy` subpath) stays out of the eager
-// module graph so the .mcpb bundle and the Cloudflare Worker never load it.
+// module graph so the .mcpb bundle never loads it.
 //
 // Capturing the WHOLE cookie header (the alltrails capture-header pattern) is
 // more robust than enumerating Groupon's individual cookie names — the session

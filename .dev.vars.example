@@ -1,8 +1,0 @@
-# Local Worker dev overrides for `wrangler dev` (copy to `.dev.vars`).
-# Groupon deal reads hit an ANONYMOUS public endpoint — there are NO app-level
-# credentials, API keys, or per-user secrets anywhere in this connector. The
-# only var below is an optional read-cache tuning knob mirroring the stdio
-# server; you almost certainly don't need to set it.
-
-# Response-cache TTL for repeated browse/search reads, in seconds (0 = off).
-# GROUPON_CACHE_TTL=60

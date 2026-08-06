@@ -61,13 +61,13 @@ export interface GrouponWebClientOptions {
 /**
  * Authenticated client for Groupon's CART operations. Kept entirely separate
  * from the anonymous read `GrouponClient` (client.ts) so the read tools — and
- * the Cloudflare Worker connector, which imports only client.ts — never pull in
+ * a read-only deployment, which imports only client.ts — never pull in
  * the cookie-bootstrap / fetchproxy auth tree.
  *
  * Auth resolves in order: `GROUPON_SESSION_COOKIE` (env, read at construction) →
  * a fetchproxy `capture_request_header` bootstrap of the `Cookie` header from
  * the signed-in browser tab (LAZY-imported so the env path never loads the
- * bridge, and the .mcpb bundle / Worker never eager-load `@fetchproxy/*`) → a
+ * bridge, and the .mcpb bundle never eager-loads `@fetchproxy/*`) → a
  * deferred config error at the first cart call. Deferred-config: reads still
  * boot with no creds; the missing-session error surfaces only here.
  */

@@ -15,9 +15,6 @@ import { registerCartTools } from './tools/cart.js';
 // ids through the anonymous read `client`. Deferred-config: reads still boot
 // with no credential — the missing-session error surfaces only on the first
 // cart call.
-//
-// The Cloudflare connector (src/worker.ts) deliberately does NOT register the
-// cart tools, keeping the cookie/fetchproxy auth tree out of the Worker bundle.
 await runMcp({
   name: 'groupon-mcp',
   version: VERSION,

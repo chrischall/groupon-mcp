@@ -2,7 +2,7 @@
 
 MCP server for [Groupon](https://www.groupon.com). Reads Groupon's public consumer GraphQL endpoint and exposes deal search/browse tools to Claude over stdio. Read-only: no API key, no account, no cookies.
 
-**Status: read-path MVP.** This phase establishes the Groupon identity and a minimal, compiling stdio skeleton (`runMcp` with an empty tool set). The deal-read client and tools land in later phases. Purchase / cookie-session / hosted-connector paths are intentionally out of scope and were stripped from the scaffold — they return later.
+**Status: read-path MVP.** This phase establishes the Groupon identity and a minimal, compiling stdio skeleton (`runMcp` with an empty tool set). The deal-read client and tools land in later phases. Purchase / cookie-session / hosted-credential paths are intentionally out of scope and were stripped from the scaffold — they return later.
 
 ## Commands
 
