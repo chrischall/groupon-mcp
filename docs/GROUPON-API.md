@@ -86,9 +86,8 @@ header the web client sends.
 > `Cookie` + `content-type` + `apollographql-client-name` + `x-operation-name`
 > and nothing else. The cookie is resolved via the fetchproxy cookie-bootstrap
 > trio (`GROUPON_SESSION_COOKIE` env → captured `Cookie` header from the signed-in
-> browser tab → deferred error). This path is **stdio-MCP-only** — deliberately
-> excluded from the hosted Cloudflare connector so the cookie/fetchproxy auth
-> tree never reaches the Worker bundle.
+> browser tab → deferred error). This path needs a signed-in browser on the
+> same machine, so it is available only where that holds.
 
 The mutation hashes below are PUBLIC persisted-query fingerprints (same as the
 reads) — not credentials, and they can go stale on a Groupon frontend redeploy.

@@ -1,5 +1,5 @@
-// Cart / purchase tools (STDIO server ONLY — deliberately absent from the hosted
-// Cloudflare connector, which imports only the anonymous read tree).
+// Cart / purchase tools. These need a signed-in browser on the same machine;
+// a deployment without one registers the anonymous read tree alone.
 //
 // These are the confirm-gated WRITE surface: view the signed-in user's cart, add
 // a deal option to it, and clear it. They front Groupon's authenticated cart ops
