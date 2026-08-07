@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.5](https://github.com/chrischall/groupon-mcp/compare/v0.1.4...v0.1.5) (2026-08-07)
+
+
+### Bug Fixes
+
+* **connector:** finish the retirement sweep ([#32](https://github.com/chrischall/groupon-mcp/issues/32)) ([f75021d](https://github.com/chrischall/groupon-mcp/commit/f75021d01d701791d7a46f75b7a53f86f29deb93))
+
+
+### Refactor
+
+* **connector:** retire the standalone Cloudflare Worker connector ([#29](https://github.com/chrischall/groupon-mcp/issues/29)) ([4782755](https://github.com/chrischall/groupon-mcp/commit/4782755ed3fae2e9b3378dfad85a90465d51d4b1))
+
 ## [0.1.4](https://github.com/chrischall/groupon-mcp/compare/v0.1.3...v0.1.4) (2026-08-06)
 
 
