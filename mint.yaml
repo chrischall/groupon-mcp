@@ -24,6 +24,12 @@ env:
       An authenticated groupon.com `Cookie` header, required for cart operations
       (anonymous reads do not need it). Falls back to lifting the cookie from a
       signed-in browser tab unless GROUPON_DISABLE_FETCHPROXY is set.
+  - name: GROUPON_DISABLE_FETCHPROXY
+    required: false
+    help: >-
+      Set to 1 to disable the browser-bridge fallback that lifts the session
+      cookie from a signed-in tab, making a missing GROUPON_SESSION_COOKIE a
+      hard error. Recommended when hosted, where there is no browser.
 state:
   dataDir: true
   reason: >-
