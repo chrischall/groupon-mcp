@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6](https://github.com/chrischall/groupon-mcp/compare/v0.1.5...v0.1.6) (2026-08-27)
+
+
+### Documentation
+
+* npm test now typechecks before running vitest ([#42](https://github.com/chrischall/groupon-mcp/issues/42)) ([8f6b6c9](https://github.com/chrischall/groupon-mcp/commit/8f6b6c95fcbbb41e2b55598ba89f8aefd8551ef0))
+* **readme:** npm test now typechecks before running vitest ([#44](https://github.com/chrischall/groupon-mcp/issues/44)) ([0c0c22d](https://github.com/chrischall/groupon-mcp/commit/0c0c22de9e4500cd6efc27e173bc44619b4b6c51))
+
 ## [0.1.5](https://github.com/chrischall/groupon-mcp/compare/v0.1.4...v0.1.5) (2026-08-07)
 
 
