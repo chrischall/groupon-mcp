@@ -8,9 +8,9 @@ MCP server for [Groupon](https://www.groupon.com). Reads Groupon's public consum
 
 ```bash
 npm run build          # tsc + esbuild bundle → dist/index.js + dist/bundle.js
-npm test               # vitest run
+npm test               # tsc typecheck + vitest run
 npm run test:watch     # vitest watch
-npm run test:coverage  # vitest run --coverage (v8 reporter, no thresholds)
+npm run test:coverage  # tsc typecheck + vitest run --coverage (v8 reporter, no thresholds)
 ```
 
 Run locally (requires built `dist/`):
