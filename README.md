@@ -32,7 +32,7 @@ Add the server to your `.mcp.json`:
 ```bash
 npm install
 npm run build   # tsc + esbuild bundle → dist/
-npm test        # vitest
+npm test        # tsc typecheck + vitest
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture, conventions, and gotchas.
