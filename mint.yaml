@@ -41,5 +41,16 @@ egress:
   allow:
     # Only hosts the SERVER process actually fetches. Hosts that appear
     # solely in a URL this server BUILDS and returns are excluded.
-    - groupon.com
+    #
+    # Every mode dials the same one host. Anonymous deal reads
+    # (src/client.ts) and cookie-authenticated cart calls
+    # (src/web-client.ts) are both plain process fetches of
+    # https://www.groupon.com/mobilenextapi/graphql; the browser bridge
+    # (src/fetchproxy-cookie.ts) only LIFTS the Cookie header out of the
+    # signed-in tab — it never carries the request, so the process dials
+    # www.groupon.com whether the cookie came from the env or the bridge.
+    # The endpoint answers directly (no redirect hop). The apex
+    # `groupon.com` is only the bridge's cookie SCOPE and never dialled;
+    # `www.groupon.com/checkout/cart` is a URL cart tools build and RETURN.
+    # GROUPON_GRAPHQL_URL replaces the host at runtime — add it here if set.
     - www.groupon.com
