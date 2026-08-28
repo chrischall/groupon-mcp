@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/chrischall/groupon-mcp/compare/v0.1.6...v0.1.7) (2026-08-28)
+
+
+### Bug Fixes
+
+* **egress:** declare only the hosts the server process dials in mint.yaml ([#45](https://github.com/chrischall/groupon-mcp/issues/45)) ([d209a1a](https://github.com/chrischall/groupon-mcp/commit/d209a1a422afb240e94d683c46487ee1ddcb8258))
+
 ## [0.1.6](https://github.com/chrischall/groupon-mcp/compare/v0.1.5...v0.1.6) (2026-08-27)
 
 
