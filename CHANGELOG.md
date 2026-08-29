@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/chrischall/groupon-mcp/compare/v0.1.7...v0.2.0) (2026-08-29)
+
+
+### Features
+
+* **deps:** take @fetchproxy/server 2.2.0 so the concentrator can bind its sandbox address ([#47](https://github.com/chrischall/groupon-mcp/issues/47)) ([e3e9b8a](https://github.com/chrischall/groupon-mcp/commit/e3e9b8a7ac8f403249d8ef17bd552c0daf0d0dbd))
+
 ## [0.1.7](https://github.com/chrischall/groupon-mcp/compare/v0.1.6...v0.1.7) (2026-08-28)
 
 
