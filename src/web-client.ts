@@ -51,6 +51,22 @@ export interface GrouponWebClientOptions {
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   /**
+   * Test/override seam: the browser-cookie lift.
+   *
+   * The default lazily imports `fetchproxy-cookie.ts` INSIDE the call, so the
+   * env path still never pulls `@fetchproxy/*` into the eager module graph —
+   * that laziness is the reason the import lives where it does and must
+   * survive this seam.
+   *
+   * It exists because the alternative for tests was `vi.doMock` on that module,
+   * and this class is imported STATICALLY by the suite: `vi.resetModules()`
+   * cannot rebind an already-bound import, so whether the dynamic import saw
+   * the mock depended on registry state at call time. That made the
+   * expired-session tests flaky in CI — `expected 3 calls, got 0` when the real
+   * resolver ran instead of the spy — while passing locally every time.
+   */
+  resolveCookie?: () => Promise<{ cookieHeader: string }>;
+  /**
    * Test/override seam: a pre-resolved session cookie. When set (or when
    * GROUPON_SESSION_COOKIE is present) `requireCookie()` never imports the
    * fetchproxy bridge.
@@ -82,6 +98,7 @@ export class GrouponWebClient {
   private readonly endpoint: string;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly resolveCookie: () => Promise<{ cookieHeader: string }>;
 
   constructor(opts: GrouponWebClientOptions = {}) {
     this.cookie = opts.cookie ?? readEnvVar('GROUPON_SESSION_COOKIE') ?? null;
@@ -89,6 +106,14 @@ export class GrouponWebClient {
     this.endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.resolveCookie =
+      opts.resolveCookie ??
+      (async () => {
+        // Imported here, not at module scope: the env path must not load the
+        // bridge (see the seam's docblock).
+        const { resolveSessionCookie } = await import('./fetchproxy-cookie.js');
+        return resolveSessionCookie();
+      });
   }
 
   /**
@@ -106,8 +131,7 @@ export class GrouponWebClient {
    */
   private async requireCookie(): Promise<string> {
     if (this.cookie) return this.cookie;
-    const { resolveSessionCookie } = await import('./fetchproxy-cookie.js');
-    const { cookieHeader } = await resolveSessionCookie();
+    const { cookieHeader } = await this.resolveCookie();
     this.cookie = cookieHeader;
     this.cookieSource = 'lift';
     return cookieHeader;
