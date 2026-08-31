@@ -175,13 +175,28 @@ describe('GrouponWebClient', () => {
 // there and must NOT be attempted; that case still fails fast.
 describe('GrouponWebClient — expired browser session', () => {
   afterEach(() => {
-    vi.resetModules();
     delete process.env.GROUPON_SESSION_COOKIE;
+    // Or a test that never calls mockLift silently inherits the previous
+    // test's lift — the same cross-test leakage the module mock had.
+    nextLift = null;
   });
 
-  /** Client with no injected cookie, so it resolves via the (mocked) lift. */
+  // The lift is INJECTED, not module-mocked. `vi.doMock` on
+  // fetchproxy-cookie.ts could not be relied on here: GrouponWebClient is
+  // imported statically by this file, `vi.resetModules()` cannot rebind an
+  // already-bound import, and so whether the client's dynamic import saw the
+  // mock depended on module-registry state at call time. These tests passed
+  // locally every run and failed in CI with `expected 3 calls, got 0` — the
+  // real resolver running in place of the spy.
+  let nextLift: ReturnType<typeof mockLift> | null = null;
+
+  /** Client with no injected cookie, so it resolves via the injected lift. */
   function liftClient(fetchImpl: typeof fetch) {
-    return new GrouponWebClient({ fetchImpl, sleep: async () => {} });
+    return new GrouponWebClient({
+      fetchImpl,
+      sleep: async () => {},
+      ...(nextLift ? { resolveCookie: nextLift } : {}),
+    });
   }
 
   function mockLift(...cookies: string[]) {
@@ -189,7 +204,7 @@ describe('GrouponWebClient — expired browser session', () => {
     const resolveSessionCookie = vi.fn(async () => ({
       cookieHeader: cookies[Math.min(i++, cookies.length - 1)]!,
     }));
-    vi.doMock('../src/fetchproxy-cookie.js', () => ({ resolveSessionCookie }));
+    nextLift = resolveSessionCookie;
     return resolveSessionCookie;
   }
 
@@ -281,5 +296,21 @@ describe('GrouponWebClient — expired browser session', () => {
     expect(lift).toHaveBeenCalledTimes(3);
     const recovered = (fetchImpl.mock.calls[2]![1] as RequestInit).headers as Record<string, string>;
     expect(recovered.Cookie).toBe('session=alive');
+  });
+});
+
+// The seam must not cost the property the lazy import exists for: the env path
+// must never pull `@fetchproxy/*` into the module graph. Asserted on the SOURCE
+// because an eager import is a static fact about the file, and a runtime check
+// would pass whenever some earlier test happened to load it already.
+describe('the lift stays lazily imported', () => {
+  it('web-client.ts imports fetchproxy-cookie only inside a function', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, '..', 'src', 'web-client.ts'), 'utf8');
+    // No top-level `import … from './fetchproxy-cookie.js'`.
+    expect(src).not.toMatch(/^import[^\n]*fetchproxy-cookie/m);
+    // And it IS still reachable dynamically.
+    expect(src).toMatch(/await import\('\.\/fetchproxy-cookie\.js'\)/);
   });
 });
