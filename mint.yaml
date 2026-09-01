@@ -30,6 +30,11 @@ env:
       Set to 1 to disable the browser-bridge fallback that lifts the session
       cookie from a signed-in tab, making a missing GROUPON_SESSION_COOKIE a
       hard error. Recommended when hosted, where there is no browser.
+  - name: GROUPON_CACHE_TTL
+    required: false
+    help: >-
+      How long cached responses stay fresh. Accepts a duration (e.g. 10m) or
+      milliseconds.
 state:
   dataDir: true
   reason: >-
