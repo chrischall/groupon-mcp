@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0](https://github.com/chrischall/groupon-mcp/compare/v0.2.0...v0.3.0) (2026-09-04)
+
+
+### Features
+
+* **tools:** compact by default, on the projection this repo already had ([#63](https://github.com/chrischall/groupon-mcp/issues/63)) ([46ba43b](https://github.com/chrischall/groupon-mcp/commit/46ba43ba112930eccb3d6842d685fba4f85fa59f))
+
+
+### Bug Fixes
+
+* **build:** restore the literal em dash in the package description ([#66](https://github.com/chrischall/groupon-mcp/issues/66)) ([70326bd](https://github.com/chrischall/groupon-mcp/commit/70326bd58373df4c686583ba902e988bae8ddfd7))
+* **deps:** pick up @chrischall/mcp-utils 0.23.2 ([#68](https://github.com/chrischall/groupon-mcp/issues/68)) ([62ee38c](https://github.com/chrischall/groupon-mcp/commit/62ee38c7a99e455ef013e126f9fe7ce2e281943e))
+* **tools:** stop advertising a compact=true parameter that no longer exists ([#69](https://github.com/chrischall/groupon-mcp/issues/69)) ([bb92c24](https://github.com/chrischall/groupon-mcp/commit/bb92c246806f29924fdb4d466a522fcb76f1b274))
+
+
+### Documentation
+
+* **mint:** declare GROUPON_CACHE_TTL in mint.yaml ([#57](https://github.com/chrischall/groupon-mcp/issues/57)) ([7325212](https://github.com/chrischall/groupon-mcp/commit/7325212c3ae5b26dc43f16623bfe7d4ce208ba41))
+
 ## [0.2.0](https://github.com/chrischall/groupon-mcp/compare/v0.1.7...v0.2.0) (2026-08-29)
 
 
