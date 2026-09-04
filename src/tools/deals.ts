@@ -8,7 +8,8 @@
 // discount, locations) — recommended for browsing so the model isn't flooded
 // with image-size variants, option grids, and marketing blobs.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult } from '@chrischall/mcp-utils';
+import { isCompact, viewArg, viewResponse } from '../view.js';
+import { minifiedResult } from '@chrischall/mcp-utils';
 import { z } from 'zod';
 import type { GrouponClient, BrowseDealFeed } from '../client.js';
 
@@ -75,10 +76,7 @@ export function registerDealTools(server: McpServer, client: GrouponClient): voi
           .describe('Groupon city slug, e.g. new-york, chicago, syracuse.'),
         limit: z.number().int().min(1).max(100).default(24).describe('Maximum number of deals to return (1-100).'),
         offset: z.number().int().min(0).default(0).describe('Number of deals to skip for pagination (0-based).'),
-        compact: z
-          .boolean()
-          .default(false)
-          .describe('Return slim deal summaries instead of full cards (recommended for browsing).'),
+        view: viewArg(),
       },
     },
     async (args) => {
@@ -88,7 +86,7 @@ export function registerDealTools(server: McpServer, client: GrouponClient): voi
         limit: args.limit,
         offset: args.offset,
       });
-      return textResult(args.compact ? compactFeed(feed) : feed);
+      return minifiedResult(isCompact(args.view) ? compactFeed(feed) : feed);
     },
   );
 }

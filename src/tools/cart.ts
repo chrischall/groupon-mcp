@@ -23,15 +23,9 @@
 // (optionUuid) — for the observed deal these two were the same value, but they
 // are read independently so a future divergence is handled correctly.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { isCompact, viewArg, viewResponse } from '../view.js';
 import { z } from 'zod';
-import {
-  textResult,
-  toolAnnotations,
-  schemaConfirm,
-  NonEmptyString,
-  PositiveInt,
-  McpToolError,
-} from '@chrischall/mcp-utils';
+import { McpToolError, NonEmptyString, PositiveInt, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { GrouponClient, GetDeal } from '../client.js';
 import type { GrouponWebClient } from '../web-client.js';
 import { stripDealId } from './detail.js';
@@ -46,7 +40,7 @@ const CHECKOUT_URL = 'https://www.groupon.com/checkout/cart';
  * note. No network mutation happens on this path.
  */
 function previewResult(action: string, wouldDo: Record<string, unknown>, caveat?: string) {
-  return textResult({
+  return minifiedResult({
     preview: true,
     action,
     note: `DRY RUN — nothing was sent to Groupon. Re-run with confirm: true to perform this.${caveat ? ` ${caveat}` : ''}`,
@@ -210,7 +204,7 @@ export function registerCartTools(
     },
     async () => {
       const cart = await webClient.getCart();
-      return textResult(cart);
+      return minifiedResult(cart);
     },
   );
 
@@ -272,7 +266,7 @@ export function registerCartTools(
       const cart = await webClient.getCart();
       const verified = cartContainsOptionId(cart, resolved.optionId);
 
-      return textResult({
+      return minifiedResult({
         added: true,
         verified,
         deal: resolved.dealTitle,
@@ -301,7 +295,7 @@ export function registerCartTools(
       const optionIds = collectCartOptionIds(cart);
 
       if (optionIds.length === 0) {
-        return textResult({
+        return minifiedResult({
           cleared: true,
           verified: true,
           removed: 0,
@@ -325,14 +319,14 @@ export function registerCartTools(
       const verified = remaining.length === 0;
 
       if (verified) {
-        return textResult({
+        return minifiedResult({
           cleared: true,
           verified: true,
           removed: optionIds.length,
           note: 'Your Groupon cart is now empty.',
         });
       }
-      return textResult({
+      return minifiedResult({
         cleared: true,
         verified: false,
         removed: optionIds.length,
