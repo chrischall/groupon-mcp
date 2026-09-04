@@ -3,12 +3,13 @@
 //
 // The `groupon_search_deals` tool fronts the verified `BrowseDealFeed` op on
 // Groupon's consumer GraphQL endpoint. Omit `query` for a plain category/city
-// browse; pass `query` for a free-text search. `compact=true` projects each
-// deal card down to a slim summary (title, url, price, merchant, rating,
-// discount, locations) — recommended for browsing so the model isn't flooded
-// with image-size variants, option grids, and marketing blobs.
+// browse; pass `query` for a free-text search. The default `compact` rung
+// projects each deal card down to a slim summary (title, url, price, merchant,
+// rating, discount, locations), so the model isn't flooded with image-size
+// variants, option grids, and marketing blobs; `view="full"` returns the cards
+// whole.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { isCompact, viewArg, viewResponse } from '../view.js';
+import { isCompact, viewArg } from '../view.js';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import { z } from 'zod';
 import type { GrouponClient, BrowseDealFeed } from '../client.js';
@@ -63,7 +64,8 @@ export function registerDealTools(server: McpServer, client: GrouponClient): voi
     {
       description:
         'Search or browse Groupon deals for a city (division). Pass `query` for a free-text search (e.g. "massage", ' +
-        '"pizza"); omit it for a plain category/city browse. Set compact=true for slim deal summaries when browsing.',
+        '"pizza"); omit it for a plain category/city browse. Returns slim deal summaries by default; ' +
+        'set view="full" for Groupon\'s whole cards.',
       annotations: { readOnlyHint: true },
       inputSchema: {
         query: z
