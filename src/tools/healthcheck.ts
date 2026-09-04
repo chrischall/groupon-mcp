@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult } from '@chrischall/mcp-utils';
+import { isCompact, viewArg, viewResponse } from '../view.js';
+import { minifiedResult } from '@chrischall/mcp-utils';
 import { VERSION } from '../version.js';
 
 // Read-path MVP placeholder. Registering at least one tool is what makes the
@@ -15,7 +16,7 @@ export function registerHealthcheckTools(server: McpServer): void {
       inputSchema: {},
     },
     async () =>
-      textResult({
+      minifiedResult({
         ok: true,
         server: 'groupon-mcp',
         version: VERSION,

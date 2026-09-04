@@ -26,12 +26,12 @@ const fatCard = {
 };
 
 describe('groupon_search_deals', () => {
-  it('passes args through to browseDealFeed and returns the full feed by default', async () => {
+  it('passes args through to browseDealFeed and returns the full feed on view:"full"', async () => {
     const feed = { cards: [fatCard], pagination: { offset: 0 }, facets: [], __typename: 'DealFeed' };
     const spy = vi.spyOn(client, 'browseDealFeed').mockResolvedValue(feed);
     const h = await createTestHarness((s) => registerDealTools(s, client));
 
-    const res = await h.callTool('groupon_search_deals', {
+    const res = await h.callTool('groupon_search_deals', { view: 'full', 
       query: 'massage',
       division: 'chicago',
       limit: 5,

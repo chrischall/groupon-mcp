@@ -9,7 +9,8 @@
 // returns Groupon's category taxonomy tree (optionally a compact {title, url,
 // children} tree).
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult } from '@chrischall/mcp-utils';
+import { isCompact, viewArg, viewResponse } from '../view.js';
+import { minifiedResult } from '@chrischall/mcp-utils';
 import { z } from 'zod';
 import type { GrouponClient, GetDeal, MainNavigation } from '../client.js';
 
@@ -137,16 +138,13 @@ export function registerDetailTools(server: McpServer, client: GrouponClient): v
             'Deal permalink slug (e.g. "enset-productions-and-ventures-3") OR a full Groupon deal URL — the last path segment is used.',
           ),
         optionId: z.string().optional().describe('Optional deal option id to focus on.'),
-        compact: z
-          .boolean()
-          .default(false)
-          .describe('Return a slim projection instead of the full deal.'),
+        view: viewArg(),
       },
     },
     async (args) => {
       const dealId = stripDealId(args.dealId);
       const deal = await client.getDeal({ dealId, optionId: args.optionId });
-      return textResult(args.compact ? compactDeal(deal) : deal);
+      return minifiedResult(isCompact(args.view) ? compactDeal(deal) : deal);
     },
   );
 
@@ -157,15 +155,12 @@ export function registerDetailTools(server: McpServer, client: GrouponClient): v
         "Fetch Groupon's category taxonomy tree. Set compact=true for a slim {title, url, children} tree.",
       annotations: { readOnlyHint: true },
       inputSchema: {
-        compact: z
-          .boolean()
-          .default(false)
-          .describe('Return a slim {title, url, children} tree instead of the full taxonomy payload.'),
+        view: viewArg(),
       },
     },
     async (args) => {
       const nav = await client.getMainNavigation();
-      return textResult(args.compact ? compactNavigation(nav) : nav);
+      return minifiedResult(isCompact(args.view) ? compactNavigation(nav) : nav);
     },
   );
 }
