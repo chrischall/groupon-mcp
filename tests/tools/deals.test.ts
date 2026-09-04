@@ -51,7 +51,7 @@ describe('groupon_search_deals', () => {
     const spy = vi.spyOn(client, 'browseDealFeed').mockResolvedValue(feed);
     const h = await createTestHarness((s) => registerDealTools(s, client));
 
-    const res = await h.callTool('groupon_search_deals', { compact: true });
+    const res = await h.callTool('groupon_search_deals', {});
 
     // division default applied.
     expect(spy.mock.calls[0][0]).toEqual({ query: undefined, division: 'new-york', limit: 24, offset: 0 });
@@ -82,7 +82,7 @@ describe('groupon_search_deals', () => {
     vi.spyOn(client, 'browseDealFeed').mockResolvedValue(feed);
     const h = await createTestHarness((s) => registerDealTools(s, client));
 
-    const res = await h.callTool('groupon_search_deals', { compact: true });
+    const res = await h.callTool('groupon_search_deals', {});
 
     const data = parseToolResult<typeof feed>(res);
     expect(data).toEqual(feed);

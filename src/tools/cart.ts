@@ -23,7 +23,6 @@
 // (optionUuid) — for the observed deal these two were the same value, but they
 // are read independently so a future divergence is handled correctly.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { isCompact, viewArg, viewResponse } from '../view.js';
 import { z } from 'zod';
 import { McpToolError, NonEmptyString, PositiveInt, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
 import type { GrouponClient, GetDeal } from '../client.js';

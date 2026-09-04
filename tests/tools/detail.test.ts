@@ -65,7 +65,7 @@ describe('groupon_get_deal', () => {
     await h.close();
   });
 
-  it('projects a compact view when BY DEFAULT', async () => {
+  it('projects a compact view by default', async () => {
     vi.spyOn(client, 'getDeal').mockResolvedValue(fatDeal);
     const h = await createTestHarness((s) => registerDetailTools(s, client));
 
@@ -133,11 +133,11 @@ describe('groupon_list_categories', () => {
     await h.close();
   });
 
-  it('projects a compact {title, url, children} tree when BY DEFAULT', async () => {
+  it('projects a compact {title, url, children} tree by default', async () => {
     vi.spyOn(client, 'getMainNavigation').mockResolvedValue(navPayload);
     const h = await createTestHarness((s) => registerDetailTools(s, client));
 
-    const res = await h.callTool('groupon_list_categories', { compact: true });
+    const res = await h.callTool('groupon_list_categories', {});
 
     const data = parseToolResult<{ navigation: Record<string, unknown>[] }>(res);
     expect(data).toEqual({
@@ -161,7 +161,7 @@ describe('groupon_list_categories', () => {
     vi.spyOn(client, 'getMainNavigation').mockResolvedValue(nav);
     const h = await createTestHarness((s) => registerDetailTools(s, client));
 
-    const res = await h.callTool('groupon_list_categories', { compact: true });
+    const res = await h.callTool('groupon_list_categories', {});
 
     const data = parseToolResult<typeof nav>(res);
     expect(data).toEqual(nav);

@@ -1,5 +1,4 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { isCompact, viewArg, viewResponse } from '../view.js';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import { VERSION } from '../version.js';
 

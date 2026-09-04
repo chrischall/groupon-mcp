@@ -3,13 +3,13 @@
 // `groupon_get_deal` fronts the verified `getDeal` op (deal detail by permalink
 // slug) — it works even though the `/deals/<slug>` PAGE 403s server-side. The
 // dealId input accepts either a bare slug or a full Groupon deal URL (stripped
-// to its last path segment). `compact=true` projects a slim view.
+// to its last path segment). The default `compact` rung projects a slim view.
 //
 // `groupon_list_categories` fronts the verified `GetMainNavigation` op and
-// returns Groupon's category taxonomy tree (optionally a compact {title, url,
+// returns Groupon's category taxonomy tree (by default a compact {title, url,
 // children} tree).
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { isCompact, viewArg, viewResponse } from '../view.js';
+import { isCompact, viewArg } from '../view.js';
 import { minifiedResult } from '@chrischall/mcp-utils';
 import { z } from 'zod';
 import type { GrouponClient, GetDeal, MainNavigation } from '../client.js';
@@ -126,8 +126,9 @@ export function registerDetailTools(server: McpServer, client: GrouponClient): v
     'groupon_get_deal',
     {
       description:
-        'Fetch a single Groupon deal by its permalink slug (or full deal URL). Returns full detail by default; ' +
-        'set compact=true for a slim view (title, subtitle, merchant, price, rating, division, option summaries, url).',
+        'Fetch a single Groupon deal by its permalink slug (or full deal URL). Returns the slim projection by ' +
+        'default (title, subtitle, merchant, price, rating, division, option summaries, url); ' +
+        'set view="full" for Groupon\'s whole record.',
       annotations: { readOnlyHint: true },
       inputSchema: {
         dealId: z
@@ -152,7 +153,8 @@ export function registerDetailTools(server: McpServer, client: GrouponClient): v
     'groupon_list_categories',
     {
       description:
-        "Fetch Groupon's category taxonomy tree. Set compact=true for a slim {title, url, children} tree.",
+        "Fetch Groupon's category taxonomy tree. Returns a slim {title, url, children} tree by default; " +
+        'set view="full" for Groupon\'s whole payload.',
       annotations: { readOnlyHint: true },
       inputSchema: {
         view: viewArg(),
