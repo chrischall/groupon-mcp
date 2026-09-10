@@ -3,4 +3,4 @@
 // release-please-config.json's `extra-files`), and `versionSyncTest` guards
 // that it stays equal to package.json. Import VERSION wherever the version is
 // needed rather than re-declaring it.
-export const VERSION = '0.3.0'; // x-release-please-version
+export const VERSION = '0.3.1'; // x-release-please-version

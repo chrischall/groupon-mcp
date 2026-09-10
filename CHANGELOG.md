@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/chrischall/groupon-mcp/compare/v0.3.0...v0.3.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 2.10.0 and @chrischall/mcp-utils 0.26.1 ([#79](https://github.com/chrischall/groupon-mcp/issues/79)) ([3b8bbbb](https://github.com/chrischall/groupon-mcp/commit/3b8bbbb97c7c873b5cc60272635d0c67da5d2a85))
+* **deps:** bump hono from 4.13.0 to 4.13.7 ([#77](https://github.com/chrischall/groupon-mcp/issues/77)) ([152adec](https://github.com/chrischall/groupon-mcp/commit/152adecac058f86135aeb621534305d9b4a3783b))
+* **deps:** declare the peer floors mcp-utils 0.26.1 requires ([#80](https://github.com/chrischall/groupon-mcp/issues/80)) ([a6e807f](https://github.com/chrischall/groupon-mcp/commit/a6e807f6c89b9afc61495a7b77a7185af90ea649))
+
 ## [0.3.0](https://github.com/chrischall/groupon-mcp/compare/v0.2.0...v0.3.0) (2026-09-04)
 
 
