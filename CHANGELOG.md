@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/chrischall/groupon-mcp/compare/v0.3.1...v0.3.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 2.11.3, so the hosted extension pin persists ([#82](https://github.com/chrischall/groupon-mcp/issues/82)) ([ab25db0](https://github.com/chrischall/groupon-mcp/commit/ab25db0efbd2d46db607db686d886a1c7f9372b8))
+* **deps:** bump @fetchproxy/bootstrap ([#85](https://github.com/chrischall/groupon-mcp/issues/85)) ([86b9b2f](https://github.com/chrischall/groupon-mcp/commit/86b9b2f6eade15c96f64d02a9d67d75771ba4636))
+
 ## [0.3.1](https://github.com/chrischall/groupon-mcp/compare/v0.3.0...v0.3.1) (2026-09-10)
 
 
