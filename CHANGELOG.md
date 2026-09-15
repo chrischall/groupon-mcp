@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/chrischall/groupon-mcp/compare/v0.3.2...v0.3.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 3.0.1 — capped peer frames, logged load drops, atomic identity writes ([#87](https://github.com/chrischall/groupon-mcp/issues/87)) ([bff5b5a](https://github.com/chrischall/groupon-mcp/commit/bff5b5aaee878ec3b7125d37e500e81317782aba))
+
 ## [0.3.2](https://github.com/chrischall/groupon-mcp/compare/v0.3.1...v0.3.2) (2026-09-14)
 
 
