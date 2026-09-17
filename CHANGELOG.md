@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/chrischall/groupon-mcp/compare/v0.3.3...v0.4.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** migrate server to SDK v2 ([#90](https://github.com/chrischall/groupon-mcp/issues/90))
+
+### Features
+
+* **mcp:** migrate server to SDK v2 ([#90](https://github.com/chrischall/groupon-mcp/issues/90)) ([b25511e](https://github.com/chrischall/groupon-mcp/commit/b25511e2712fa68a82eb13dde8f5e9cf8778cfd2))
+
+
+### Bug Fixes
+
+* **build:** resolve and verify Zod bundle alias ([#93](https://github.com/chrischall/groupon-mcp/issues/93)) ([d9b1371](https://github.com/chrischall/groupon-mcp/commit/d9b1371c2700a002861baeab1a6053ae47cfc78e))
+
 ## [0.3.3](https://github.com/chrischall/groupon-mcp/compare/v0.3.2...v0.3.3) (2026-09-15)
 
 
