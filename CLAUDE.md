@@ -97,5 +97,6 @@ write-verification, transport archetypes, testing traps) live in
 
 - **ESM + NodeNext**: relative imports use `.js` extensions even from `.ts` source.
 - **stdio transport**: server logs to **stderr** only — stdout is reserved for JSON-RPC.
+- **Zod v4 bundle alias**: `scripts/bundle.mjs` resolves `zod/v4` through Node's exports map and aliases it to the CommonJS export. Bundling the ESM export directly breaks SDK v2's Zod class initialization; runtime resolution keeps the workaround independent of npm hoisting and the current working directory.
 - **Lazy optional deps in the bundle**: the `.mcpb` ships no `node_modules`; keep any externalized/optional dep import lazy (`await import(...)`) so the bundled server boots.
 - **Don't hand-author GraphQL**: Groupon disables introspection and masks errors as opaque 400 HTML — always use the captured persisted-query hash.

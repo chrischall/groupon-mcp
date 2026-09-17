@@ -27,7 +27,9 @@ beforeAll(() => {
 }, 120_000);
 
 /** Spawn an MCP stdio server, run initialize + tools/list, return tool names. */
-function listToolsViaStdio(entry: string, cwd: string): Promise<string[]> {
+type ListedTool = { name: string; inputSchema?: { properties?: Record<string, { description?: string }> } };
+
+function listToolsViaStdio(entry: string, cwd: string): Promise<ListedTool[]> {
   return new Promise((resolve, reject) => {
     const child = spawn('node', [entry], {
       cwd,
@@ -46,7 +48,7 @@ function listToolsViaStdio(entry: string, cwd: string): Promise<string[]> {
       for (const line of out.split('\n')) {
         const t = line.trim();
         if (!t) continue;
-        let msg: { id?: number; result?: { tools?: { name: string }[] } };
+        let msg: { id?: number; result?: { tools?: ListedTool[] } };
         try {
           msg = JSON.parse(t);
         } catch {
@@ -55,7 +57,7 @@ function listToolsViaStdio(entry: string, cwd: string): Promise<string[]> {
         if (msg.id === 1 && msg.result) {
           clearTimeout(timer);
           child.kill('SIGKILL');
-          resolve((msg.result.tools ?? []).map((x) => x.name));
+          resolve(msg.result.tools ?? []);
           return;
         }
       }
@@ -88,14 +90,21 @@ describe('server boot (built artifacts)', () => {
     try {
       copyFileSync(BUNDLE, join(dir, 'bundle.js'));
       const tools = await listToolsViaStdio(join(dir, 'bundle.js'), dir);
-      expect(tools.length).toBeGreaterThanOrEqual(6);
-      expect(tools).toContain('groupon_healthcheck');
-      expect(tools).toContain('groupon_search_deals');
-      expect(tools).toContain('groupon_get_deal');
-      expect(tools).toContain('groupon_list_categories');
-      expect(tools).toContain('groupon_view_cart');
-      expect(tools).toContain('groupon_purchase');
-      expect(tools).toContain('groupon_clear_cart');
+      const names = tools.map((tool) => tool.name);
+      expect(names.length).toBeGreaterThanOrEqual(6);
+      expect(names).toContain('groupon_healthcheck');
+      expect(names).toContain('groupon_search_deals');
+      expect(names).toContain('groupon_get_deal');
+      expect(names).toContain('groupon_list_categories');
+      expect(names).toContain('groupon_view_cart');
+      expect(names).toContain('groupon_purchase');
+      expect(names).toContain('groupon_clear_cart');
+      expect(tools.find((tool) => tool.name === 'groupon_search_deals')?.inputSchema).toMatchObject({
+        properties: {
+          division: { description: 'Groupon city slug, e.g. new-york, chicago, syracuse.' },
+        },
+      });
+
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -103,13 +112,14 @@ describe('server boot (built artifacts)', () => {
 
   it('npm bin (dist/index.js) boots with node_modules and lists tools', async () => {
     const tools = await listToolsViaStdio(BIN, ROOT);
-    expect(tools.length).toBeGreaterThanOrEqual(6);
-    expect(tools).toContain('groupon_healthcheck');
-    expect(tools).toContain('groupon_search_deals');
-    expect(tools).toContain('groupon_get_deal');
-    expect(tools).toContain('groupon_list_categories');
-    expect(tools).toContain('groupon_view_cart');
-    expect(tools).toContain('groupon_purchase');
-    expect(tools).toContain('groupon_clear_cart');
+    const names = tools.map((tool) => tool.name);
+    expect(names.length).toBeGreaterThanOrEqual(6);
+    expect(names).toContain('groupon_healthcheck');
+    expect(names).toContain('groupon_search_deals');
+    expect(names).toContain('groupon_get_deal');
+    expect(names).toContain('groupon_list_categories');
+    expect(names).toContain('groupon_view_cart');
+    expect(names).toContain('groupon_purchase');
+    expect(names).toContain('groupon_clear_cart');
   }, 30_000);
 });
