@@ -1,3 +1,5 @@
+import type { McpServer } from "@modelcontextprotocol/server";
+
 // Deal-detail + taxonomy tools. Read-only.
 //
 // `groupon_get_deal` fronts the verified `getDeal` op (deal detail by permalink
@@ -8,11 +10,10 @@
 // `groupon_list_categories` fronts the verified `GetMainNavigation` op and
 // returns Groupon's category taxonomy tree (by default a compact {title, url,
 // children} tree).
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { isCompact, viewArg } from '../view.js';
-import { minifiedResult } from '@chrischall/mcp-utils';
-import { z } from 'zod';
-import type { GrouponClient, GetDeal, MainNavigation } from '../client.js';
+import { isCompact, viewArg } from "../view.js";
+import { minifiedResult } from "@chrischall/mcp-utils";
+import { z } from "zod";
+import type { GrouponClient, GetDeal, MainNavigation } from "../client.js";
 
 /**
  * Normalize a dealId input to a bare permalink slug. Accepts either a bare slug
@@ -21,8 +22,8 @@ import type { GrouponClient, GetDeal, MainNavigation } from '../client.js';
  */
 export function stripDealId(input: string): string {
   // Drop any query string or fragment, then trailing slashes.
-  const noQuery = input.split(/[?#]/, 1)[0].replace(/\/+$/, '');
-  const segments = noQuery.split('/');
+  const noQuery = input.split(/[?#]/, 1)[0].replace(/\/+$/, "");
+  const segments = noQuery.split("/");
   return segments[segments.length - 1] || noQuery;
 }
 
@@ -49,11 +50,14 @@ export function compactDealDetail(deal: GetDeal): Record<string, unknown> {
   if (merchant?.name !== undefined) out.merchantName = merchant.name;
   if (d.price !== undefined) out.price = d.price;
   if (d.rating !== undefined) out.rating = d.rating;
-  else if ((merchant as { rating?: unknown } | undefined)?.rating !== undefined) {
+  else if (
+    (merchant as { rating?: unknown } | undefined)?.rating !== undefined
+  ) {
     out.rating = (merchant as { rating?: unknown }).rating;
   }
   if (d.division !== undefined) out.division = d.division;
-  if (Array.isArray(d.options)) out.options = d.options.slice(0, 5).map(compactOption);
+  if (Array.isArray(d.options))
+    out.options = d.options.slice(0, 5).map(compactOption);
   if (d.dealUrl !== undefined) out.url = d.dealUrl;
   else if (d.url !== undefined) out.url = d.url;
   return out;
@@ -64,7 +68,9 @@ export function compactDealDetail(deal: GetDeal): Record<string, unknown> {
  * iterates: `options` must be an array when present (the projection `.map`s it).
  * Everything else passes through untouched.
  */
-const DealEnvelope = z.looseObject({ options: z.array(z.unknown()).optional() });
+const DealEnvelope = z.looseObject({
+  options: z.array(z.unknown()).optional(),
+});
 
 /**
  * Project a deal down to a slim view. When `options` is present but not an array
@@ -75,7 +81,7 @@ export function compactDeal(deal: GetDeal): unknown {
   const parsed = DealEnvelope.safeParse(deal);
   if (!parsed.success) {
     console.error(
-      '[groupon-mcp] WARNING: expected getDeal.options array is missing/mis-shaped — returning the raw response (compact projection skipped).',
+      "[groupon-mcp] WARNING: expected getDeal.options array is missing/mis-shaped — returning the raw response (compact projection skipped).",
     );
     return deal;
   }
@@ -114,23 +120,26 @@ export function compactNavigation(nav: MainNavigation): unknown {
   const parsed = NavEnvelope.safeParse(nav);
   if (!parsed.success) {
     console.error(
-      '[groupon-mcp] WARNING: expected navigation array is missing — returning the raw response (compact projection skipped).',
+      "[groupon-mcp] WARNING: expected navigation array is missing — returning the raw response (compact projection skipped).",
     );
     return nav;
   }
   return { navigation: parsed.data.navigation.map(compactNavNode) };
 }
 
-export function registerDetailTools(server: McpServer, client: GrouponClient): void {
+export function registerDetailTools(
+  server: McpServer,
+  client: GrouponClient,
+): void {
   server.registerTool(
-    'groupon_get_deal',
+    "groupon_get_deal",
     {
       description:
-        'Fetch a single Groupon deal by its permalink slug (or full deal URL). Returns the slim projection by ' +
-        'default (title, subtitle, merchant, price, rating, division, option summaries, url); ' +
+        "Fetch a single Groupon deal by its permalink slug (or full deal URL). Returns the slim projection by " +
+        "default (title, subtitle, merchant, price, rating, division, option summaries, url); " +
         'set view="full" for Groupon\'s whole record.',
       annotations: { readOnlyHint: true },
-      inputSchema: {
+      inputSchema: z.object({
         dealId: z
           .string()
           .trim()
@@ -138,9 +147,12 @@ export function registerDetailTools(server: McpServer, client: GrouponClient): v
           .describe(
             'Deal permalink slug (e.g. "enset-productions-and-ventures-3") OR a full Groupon deal URL — the last path segment is used.',
           ),
-        optionId: z.string().optional().describe('Optional deal option id to focus on.'),
+        optionId: z
+          .string()
+          .optional()
+          .describe("Optional deal option id to focus on."),
         view: viewArg(),
-      },
+      }),
     },
     async (args) => {
       const dealId = stripDealId(args.dealId);
@@ -150,19 +162,21 @@ export function registerDetailTools(server: McpServer, client: GrouponClient): v
   );
 
   server.registerTool(
-    'groupon_list_categories',
+    "groupon_list_categories",
     {
       description:
         "Fetch Groupon's category taxonomy tree. Returns a slim {title, url, children} tree by default; " +
         'set view="full" for Groupon\'s whole payload.',
       annotations: { readOnlyHint: true },
-      inputSchema: {
+      inputSchema: z.object({
         view: viewArg(),
-      },
+      }),
     },
     async (args) => {
       const nav = await client.getMainNavigation();
-      return minifiedResult(isCompact(args.view) ? compactNavigation(nav) : nav);
+      return minifiedResult(
+        isCompact(args.view) ? compactNavigation(nav) : nav,
+      );
     },
   );
 }

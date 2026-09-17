@@ -1,3 +1,5 @@
+import type { McpServer } from "@modelcontextprotocol/server";
+
 // Cart / purchase tools. These need a signed-in browser on the same machine;
 // a deployment without one registers the anonymous read tree alone.
 //
@@ -22,27 +24,37 @@
 // each deal.options[] entry carries the option's `id` (optionId) and `uuid`
 // (optionUuid) — for the observed deal these two were the same value, but they
 // are read independently so a future divergence is handled correctly.
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { McpToolError, NonEmptyString, PositiveInt, minifiedResult, schemaConfirm, toolAnnotations } from '@chrischall/mcp-utils';
-import type { GrouponClient, GetDeal } from '../client.js';
-import type { GrouponWebClient } from '../web-client.js';
-import { stripDealId } from './detail.js';
+import { z } from "zod";
+import {
+  McpToolError,
+  NonEmptyString,
+  PositiveInt,
+  minifiedResult,
+  schemaConfirm,
+  toolAnnotations,
+} from "@chrischall/mcp-utils";
+import type { GrouponClient, GetDeal } from "../client.js";
+import type { GrouponWebClient } from "../web-client.js";
+import { stripDealId } from "./detail.js";
 
 /** The user-facing, ready-to-pay checkout URL. There is no place-order API; the
  *  user completes payment here themselves. */
-const CHECKOUT_URL = 'https://www.groupon.com/checkout/cart';
+const CHECKOUT_URL = "https://www.groupon.com/checkout/cart";
 
 /**
  * DRY-RUN envelope. A confirm-gated tool returns this when `confirm` is not
  * `true`: the fields it WOULD act on, plus an unmistakable "nothing was sent"
  * note. No network mutation happens on this path.
  */
-function previewResult(action: string, wouldDo: Record<string, unknown>, caveat?: string) {
+function previewResult(
+  action: string,
+  wouldDo: Record<string, unknown>,
+  caveat?: string,
+) {
   return minifiedResult({
     preview: true,
     action,
-    note: `DRY RUN — nothing was sent to Groupon. Re-run with confirm: true to perform this.${caveat ? ` ${caveat}` : ''}`,
+    note: `DRY RUN — nothing was sent to Groupon. Re-run with confirm: true to perform this.${caveat ? ` ${caveat}` : ""}`,
     ...wouldDo,
   });
 }
@@ -57,15 +69,21 @@ export function collectCartOptionIds(cart: unknown): string[] {
   const ids: string[] = [];
   const seen = new Set<object>();
   const walk = (node: unknown): void => {
-    if (node === null || typeof node !== 'object') return;
+    if (node === null || typeof node !== "object") return;
     if (seen.has(node as object)) return;
     seen.add(node as object);
     if (Array.isArray(node)) {
       for (const el of node) walk(el);
       return;
     }
-    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      if (key.toLowerCase() === 'optionid' && typeof value === 'string' && value) {
+    for (const [key, value] of Object.entries(
+      node as Record<string, unknown>,
+    )) {
+      if (
+        key.toLowerCase() === "optionid" &&
+        typeof value === "string" &&
+        value
+      ) {
         ids.push(value);
       } else {
         walk(value);
@@ -97,9 +115,9 @@ function cartContainsOptionId(cart: unknown, optionId: string): boolean {
 function cartHasValue(node: unknown, target: string): boolean {
   const seen = new Set<object>();
   const walk = (n: unknown): boolean => {
-    if (typeof n === 'string') return n === target;
-    if (n === null || typeof n !== 'object') return false;
-    if (seen.has(n as object)) return false;   // cyclic payloads must terminate
+    if (typeof n === "string") return n === target;
+    if (n === null || typeof n !== "object") return false;
+    if (seen.has(n as object)) return false; // cyclic payloads must terminate
     seen.add(n as object);
     if (Array.isArray(n)) return n.some(walk);
     return Object.values(n as Record<string, unknown>).some(walk);
@@ -126,30 +144,42 @@ export interface ResolvedCartItem {
  * match an option's `id` or `uuid`. Throws an actionable {@link McpToolError} on
  * a missing/sold-out option or a drifted response shape.
  */
-export function resolveCartItem(deal: GetDeal, requestedOptionId?: string): ResolvedCartItem {
+export function resolveCartItem(
+  deal: GetDeal,
+  requestedOptionId?: string,
+): ResolvedCartItem {
   const d = (deal ?? {}) as Record<string, unknown>;
   const dealUuid = d.uuid;
-  if (typeof dealUuid !== 'string' || !dealUuid) {
-    throw new McpToolError('Could not resolve the deal UUID from this deal.', {
-      hint: 'Re-check the dealId slug, or the getDeal response shape may have drifted (expected a string `uuid`).',
+  if (typeof dealUuid !== "string" || !dealUuid) {
+    throw new McpToolError("Could not resolve the deal UUID from this deal.", {
+      hint: "Re-check the dealId slug, or the getDeal response shape may have drifted (expected a string `uuid`).",
     });
   }
 
-  const options = Array.isArray(d.options) ? (d.options as Record<string, unknown>[]) : [];
+  const options = Array.isArray(d.options)
+    ? (d.options as Record<string, unknown>[])
+    : [];
   if (options.length === 0) {
-    throw new McpToolError('This deal has no purchasable options.', {
-      hint: 'Open the deal (groupon_get_deal) to confirm it is currently available.',
+    throw new McpToolError("This deal has no purchasable options.", {
+      hint: "Open the deal (groupon_get_deal) to confirm it is currently available.",
     });
   }
 
   let option: Record<string, unknown> | undefined;
   if (requestedOptionId) {
-    option = options.find((o) => o?.id === requestedOptionId || o?.uuid === requestedOptionId);
+    option = options.find(
+      (o) => o?.id === requestedOptionId || o?.uuid === requestedOptionId,
+    );
     if (!option) {
-      const available = options.map((o) => o?.id).filter((x): x is string => typeof x === 'string');
-      throw new McpToolError(`Option "${requestedOptionId}" was not found on this deal.`, {
-        hint: `Available option ids: ${available.join(', ') || '(none)'}. Omit optionId to use the first option.`,
-      });
+      const available = options
+        .map((o) => o?.id)
+        .filter((x): x is string => typeof x === "string");
+      throw new McpToolError(
+        `Option "${requestedOptionId}" was not found on this deal.`,
+        {
+          hint: `Available option ids: ${available.join(", ") || "(none)"}. Omit optionId to use the first option.`,
+        },
+      );
     }
   } else {
     option = options[0];
@@ -157,14 +187,22 @@ export function resolveCartItem(deal: GetDeal, requestedOptionId?: string): Reso
 
   const optionId = option.id;
   const optionUuid = option.uuid;
-  if (typeof optionId !== 'string' || !optionId || typeof optionUuid !== 'string' || !optionUuid) {
-    throw new McpToolError('Could not resolve the option id/uuid for this deal option.', {
-      hint: 'The getDeal option shape may have drifted (expected string `id` and `uuid`).',
-    });
+  if (
+    typeof optionId !== "string" ||
+    !optionId ||
+    typeof optionUuid !== "string" ||
+    !optionUuid
+  ) {
+    throw new McpToolError(
+      "Could not resolve the option id/uuid for this deal option.",
+      {
+        hint: "The getDeal option shape may have drifted (expected string `id` and `uuid`).",
+      },
+    );
   }
   if (option.isSoldOut === true) {
-    throw new McpToolError('That deal option is sold out.', {
-      hint: 'Pick a different option (optionId) or a different deal.',
+    throw new McpToolError("That deal option is sold out.", {
+      hint: "Pick a different option (optionId) or a different deal.",
     });
   }
 
@@ -193,13 +231,17 @@ export function registerCartTools(
   readClient: GrouponClient,
 ): void {
   server.registerTool(
-    'groupon_view_cart',
+    "groupon_view_cart",
     {
       description:
-        'View the items currently in your signed-in Groupon cart. Requires a Groupon session ' +
-        '(GROUPON_SESSION_COOKIE, or the fetchproxy browser bridge signed into groupon.com).',
-      annotations: toolAnnotations({ title: 'View Groupon cart', readOnly: true, openWorld: true }),
-      inputSchema: {},
+        "View the items currently in your signed-in Groupon cart. Requires a Groupon session " +
+        "(GROUPON_SESSION_COOKIE, or the fetchproxy browser bridge signed into groupon.com).",
+      annotations: toolAnnotations({
+        title: "View Groupon cart",
+        readOnly: true,
+        openWorld: true,
+      }),
+      inputSchema: z.object({}),
     },
     async () => {
       const cart = await webClient.getCart();
@@ -208,26 +250,37 @@ export function registerCartTools(
   );
 
   server.registerTool(
-    'groupon_purchase',
+    "groupon_purchase",
     {
       description:
-        'Add a Groupon deal option to your cart, ready for checkout. WITHOUT confirm:true this is a DRY RUN — it ' +
-        'previews what would be added and makes NO change to your cart. WITH confirm:true it adds the item, re-reads ' +
-        'the cart to verify, and returns the checkout URL for YOU to complete payment. It CANNOT place the order — ' +
-        'Groupon checkout is native Apple/Google Pay, card, or PayPal.',
-      annotations: toolAnnotations({ title: 'Add a Groupon deal to your cart', readOnly: false, openWorld: true }),
-      inputSchema: {
+        "Add a Groupon deal option to your cart, ready for checkout. WITHOUT confirm:true this is a DRY RUN — it " +
+        "previews what would be added and makes NO change to your cart. WITH confirm:true it adds the item, re-reads " +
+        "the cart to verify, and returns the checkout URL for YOU to complete payment. It CANNOT place the order — " +
+        "Groupon checkout is native Apple/Google Pay, card, or PayPal.",
+      annotations: toolAnnotations({
+        title: "Add a Groupon deal to your cart",
+        readOnly: false,
+        openWorld: true,
+      }),
+      inputSchema: z.object({
         dealId: NonEmptyString.describe(
           'Deal permalink slug (e.g. "versailles-massage-bar-1") OR a full Groupon deal URL — the last path segment is used.',
         ),
         optionId: z
           .string()
           .optional()
-          .describe('Which deal option to buy (an option id from groupon_get_deal). Defaults to the first option.'),
-        quantity: PositiveInt.default(1).describe('How many to add (default 1).'),
-        isGift: z.boolean().default(false).describe('Mark the line item as a gift.'),
+          .describe(
+            "Which deal option to buy (an option id from groupon_get_deal). Defaults to the first option.",
+          ),
+        quantity: PositiveInt.default(1).describe(
+          "How many to add (default 1).",
+        ),
+        isGift: z
+          .boolean()
+          .default(false)
+          .describe("Mark the line item as a gift."),
         confirm: schemaConfirm,
-      },
+      }),
     },
     async ({ dealId, optionId, quantity, isGift, confirm }) => {
       const slug = stripDealId(dealId);
@@ -238,7 +291,7 @@ export function registerCartTools(
 
       if (confirm !== true) {
         return previewResult(
-          'purchase',
+          "purchase",
           {
             deal: resolved.dealTitle,
             option: resolved.optionTitle,
@@ -246,10 +299,12 @@ export function registerCartTools(
             quantity,
             isGift,
             price: resolved.price,
-            ...(resolved.strikeThroughPrice ? { strikeThroughPrice: resolved.strikeThroughPrice } : {}),
+            ...(resolved.strikeThroughPrice
+              ? { strikeThroughPrice: resolved.strikeThroughPrice }
+              : {}),
             ...(resolved.discount ? { discount: resolved.discount } : {}),
           },
-          'On confirm, this is added to your Groupon cart; you then complete payment yourself at the checkout URL.',
+          "On confirm, this is added to your Groupon cart; you then complete payment yourself at the checkout URL.",
         );
       }
 
@@ -274,20 +329,24 @@ export function registerCartTools(
         quantity,
         checkoutUrl: CHECKOUT_URL,
         note: verified
-          ? 'Item added to your Groupon cart. Open the checkout URL and complete payment (Apple/Google Pay, card, or PayPal) yourself — this tool cannot place the order.'
-          : 'Groupon accepted the add-to-cart request, but a cart re-read did not confirm the item is present. Open the checkout URL to check your cart before paying — this tool cannot place the order.',
+          ? "Item added to your Groupon cart. Open the checkout URL and complete payment (Apple/Google Pay, card, or PayPal) yourself — this tool cannot place the order."
+          : "Groupon accepted the add-to-cart request, but a cart re-read did not confirm the item is present. Open the checkout URL to check your cart before paying — this tool cannot place the order.",
       });
     },
   );
 
   server.registerTool(
-    'groupon_clear_cart',
+    "groupon_clear_cart",
     {
       description:
-        'Remove ALL items from your signed-in Groupon cart. WITHOUT confirm:true this is a DRY RUN listing what would ' +
-        'be removed. WITH confirm:true it removes every line item and re-reads the cart to verify it is empty.',
-      annotations: toolAnnotations({ title: 'Clear your Groupon cart', readOnly: false, openWorld: true }),
-      inputSchema: { confirm: schemaConfirm },
+        "Remove ALL items from your signed-in Groupon cart. WITHOUT confirm:true this is a DRY RUN listing what would " +
+        "be removed. WITH confirm:true it removes every line item and re-reads the cart to verify it is empty.",
+      annotations: toolAnnotations({
+        title: "Clear your Groupon cart",
+        readOnly: false,
+        openWorld: true,
+      }),
+      inputSchema: z.object({ confirm: schemaConfirm }),
     },
     async ({ confirm }) => {
       const cart = await webClient.getCart();
@@ -298,15 +357,15 @@ export function registerCartTools(
           cleared: true,
           verified: true,
           removed: 0,
-          note: 'Your Groupon cart is already empty.',
+          note: "Your Groupon cart is already empty.",
         });
       }
 
       if (confirm !== true) {
         return previewResult(
-          'clear_cart',
+          "clear_cart",
           { itemCount: optionIds.length, optionIds },
-          'On confirm, every line item above is removed from your cart.',
+          "On confirm, every line item above is removed from your cart.",
         );
       }
 
@@ -322,7 +381,7 @@ export function registerCartTools(
           cleared: true,
           verified: true,
           removed: optionIds.length,
-          note: 'Your Groupon cart is now empty.',
+          note: "Your Groupon cart is now empty.",
         });
       }
       return minifiedResult({
@@ -330,7 +389,7 @@ export function registerCartTools(
         verified: false,
         removed: optionIds.length,
         remaining,
-        note: 'Groupon accepted the removals, but a re-read still shows items in the cart. Open the checkout URL to check your cart.',
+        note: "Groupon accepted the removals, but a re-read still shows items in the cart. Open the checkout URL to check your cart.",
       });
     },
   );

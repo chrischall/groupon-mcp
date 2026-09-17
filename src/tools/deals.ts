@@ -1,3 +1,5 @@
+import type { McpServer } from "@modelcontextprotocol/server";
+
 // Deal tools: search / browse Groupon's consumer deal feed. Read-only — this
 // server registers no write (purchase) tools in the read-path MVP.
 //
@@ -8,11 +10,10 @@
 // rating, discount, locations), so the model isn't flooded with image-size
 // variants, option grids, and marketing blobs; `view="full"` returns the cards
 // whole.
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { isCompact, viewArg } from '../view.js';
-import { minifiedResult } from '@chrischall/mcp-utils';
-import { z } from 'zod';
-import type { GrouponClient, BrowseDealFeed } from '../client.js';
+import { isCompact, viewArg } from "../view.js";
+import { minifiedResult } from "@chrischall/mcp-utils";
+import { z } from "zod";
+import type { GrouponClient, BrowseDealFeed } from "../client.js";
 
 /**
  * Fields kept by the compact deal projection. Everything fat on a card
@@ -31,8 +32,10 @@ export function compactDeal(card: unknown): Record<string, unknown> {
   const merchant = c.merchant as { name?: unknown } | undefined;
   if (merchant?.name !== undefined) out.merchantName = merchant.name;
   if (c.rating !== undefined) out.rating = c.rating;
-  if (c.discountPercentage !== undefined) out.discountPercentage = c.discountPercentage;
-  if (c.locationsSummary !== undefined) out.locationsSummary = c.locationsSummary;
+  if (c.discountPercentage !== undefined)
+    out.discountPercentage = c.discountPercentage;
+  if (c.locationsSummary !== undefined)
+    out.locationsSummary = c.locationsSummary;
   return out;
 }
 
@@ -51,35 +54,54 @@ export function compactFeed(feed: BrowseDealFeed): unknown {
   const parsed = DealFeedEnvelope.safeParse(feed);
   if (!parsed.success) {
     console.error(
-      '[groupon-mcp] WARNING: expected browseDealFeed.cards array is missing — returning the raw response (compact projection skipped).',
+      "[groupon-mcp] WARNING: expected browseDealFeed.cards array is missing — returning the raw response (compact projection skipped).",
     );
     return feed;
   }
-  return { cards: parsed.data.cards.map(compactDeal), pagination: feed.pagination };
+  return {
+    cards: parsed.data.cards.map(compactDeal),
+    pagination: feed.pagination,
+  };
 }
 
-export function registerDealTools(server: McpServer, client: GrouponClient): void {
+export function registerDealTools(
+  server: McpServer,
+  client: GrouponClient,
+): void {
   server.registerTool(
-    'groupon_search_deals',
+    "groupon_search_deals",
     {
       description:
         'Search or browse Groupon deals for a city (division). Pass `query` for a free-text search (e.g. "massage", ' +
         '"pizza"); omit it for a plain category/city browse. Returns slim deal summaries by default; ' +
         'set view="full" for Groupon\'s whole cards.',
       annotations: { readOnlyHint: true },
-      inputSchema: {
+      inputSchema: z.object({
         query: z
           .string()
           .optional()
-          .describe('Free-text search term (e.g. "massage", "pizza"). Omit for a plain category/city browse.'),
+          .describe(
+            'Free-text search term (e.g. "massage", "pizza"). Omit for a plain category/city browse.',
+          ),
         division: z
           .string()
-          .default('new-york')
-          .describe('Groupon city slug, e.g. new-york, chicago, syracuse.'),
-        limit: z.number().int().min(1).max(100).default(24).describe('Maximum number of deals to return (1-100).'),
-        offset: z.number().int().min(0).default(0).describe('Number of deals to skip for pagination (0-based).'),
+          .default("new-york")
+          .describe("Groupon city slug, e.g. new-york, chicago, syracuse."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(24)
+          .describe("Maximum number of deals to return (1-100)."),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .default(0)
+          .describe("Number of deals to skip for pagination (0-based)."),
         view: viewArg(),
-      },
+      }),
     },
     async (args) => {
       const feed = await client.browseDealFeed({
