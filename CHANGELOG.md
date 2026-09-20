@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.0](https://github.com/chrischall/groupon-mcp/compare/v0.4.0...v1.0.0) (2026-09-20)
+
+
+### Bug Fixes
+
+* **deps:** raise the manifest node floor to match mcp-utils 1.0.0 ([#97](https://github.com/chrischall/groupon-mcp/issues/97)) ([334fc83](https://github.com/chrischall/groupon-mcp/commit/334fc832938e670d88c8bee9b290312bc3690ff8))
+* **release:** cut the major the SDK v2 migration owed ([#99](https://github.com/chrischall/groupon-mcp/issues/99)) ([05a04a7](https://github.com/chrischall/groupon-mcp/commit/05a04a704057f3a951b099a374e8ef02d693f9a6))
+
 ## [0.4.0](https://github.com/chrischall/groupon-mcp/compare/v0.3.3...v0.4.0) (2026-09-17)
 
 
