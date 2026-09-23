@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { McpToolError } from '@chrischall/mcp-utils';
 import { GrouponClient } from '../src/client.js';
 import { BROWSE_DEAL_FEED_HASH, GET_DEAL_HASH, MAIN_NAVIGATION_HASH } from '../src/graphql-ops.js';
 
@@ -104,6 +105,32 @@ describe('GrouponClient', () => {
     expect(feed.cards).toBeDefined();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledWith(3000);
+  });
+
+  it('gives the Retry-After retry a FRESH timeout signal (the first may have fired while sleeping)', async () => {
+    // The 30s timeout clock starts before the first fetch; sleeping up to 30s
+    // for Retry-After and then reusing that signal aborts the retry at once.
+    const signals: AbortSignal[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      signals.push(init.signal as AbortSignal);
+      return signals.length === 1 ? jsonRes(429, {}, { 'Retry-After': '30' }) : feedRes();
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 });
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).not.toBe(signals[0]);
+  });
+
+  it('maps a request timeout to an actionable McpToolError, not a raw TimeoutError', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 }).catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toMatch(/timed out/i);
   });
 
   it('surfaces a rate limit still failing after the retry', async () => {

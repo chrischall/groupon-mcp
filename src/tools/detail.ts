@@ -27,18 +27,25 @@ export function stripDealId(input: string): string {
   return segments[segments.length - 1] || noQuery;
 }
 
-/** One compact option summary: only the fields the projection reads. */
+/**
+ * One compact option summary. `id` is load-bearing: groupon_purchase takes "an
+ * option id from groupon_get_deal", and without it in the default view the
+ * model had nothing to pass. `isSoldOut` lets it skip an option purchase would
+ * refuse anyway.
+ */
 function compactOption(option: unknown): Record<string, unknown> {
   const o = (option ?? {}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
+  if (o.id !== undefined) out.id = o.id;
   if (o.title !== undefined) out.title = o.title;
   if (o.price !== undefined) out.price = o.price;
+  if (o.isSoldOut !== undefined) out.isSoldOut = o.isSoldOut;
   return out;
 }
 
 /**
  * Project a full deal down to a slim view (title, subtitle, merchant name,
- * price, rating, division, a few option summaries, url). Absent fields are
+ * price, rating, division, option summaries with ids, url). Absent fields are
  * simply omitted so drift never injects `undefined`s.
  */
 export function compactDealDetail(deal: GetDeal): Record<string, unknown> {
@@ -56,8 +63,9 @@ export function compactDealDetail(deal: GetDeal): Record<string, unknown> {
     out.rating = (merchant as { rating?: unknown }).rating;
   }
   if (d.division !== undefined) out.division = d.division;
-  if (Array.isArray(d.options))
-    out.options = d.options.slice(0, 5).map(compactOption);
+  // Every option, not a sample: an option cut from the compact view is one
+  // the caller cannot select for purchase.
+  if (Array.isArray(d.options)) out.options = d.options.map(compactOption);
   if (d.dealUrl !== undefined) out.url = d.dealUrl;
   else if (d.url !== undefined) out.url = d.url;
   return out;
@@ -136,7 +144,7 @@ export function registerDetailTools(
     {
       description:
         "Fetch a single Groupon deal by its permalink slug (or full deal URL). Returns the slim projection by " +
-        "default (title, subtitle, merchant, price, rating, division, option summaries, url); " +
+        "default (title, subtitle, merchant, price, rating, division, url, and every option's id/title/price/isSoldOut — pass an option id to groupon_purchase); " +
         'set view="full" for Groupon\'s whole record.',
       annotations: { readOnlyHint: true },
       inputSchema: z.object({

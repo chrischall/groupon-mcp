@@ -12,6 +12,7 @@ import {
   type DeleteCartItemArgs,
   type PersistedQueryOp,
 } from './graphql-ops.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 // Groupon's consumer GraphQL endpoint — the SAME host the anonymous reads use,
 // but the cart ops require the user's authenticated SESSION COOKIE. Verified
@@ -21,7 +22,6 @@ import {
 const DEFAULT_ENDPOINT = 'https://www.groupon.com/mobilenextapi/graphql';
 const SERVICE = 'Groupon cart';
 const CLIENT_NAME = 'mobilenextapi';
-const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRY_AFTER_MS = 30_000;
 
 /**
@@ -171,14 +171,14 @@ export class GrouponWebClient {
       buildCreateOrUpdateCartItem(args),
       'createOrUpdateCartItem',
     );
-    return (batch?.[0]?.data ?? {}) as Cart;
+    return mutationData(batch, 'add to cart');
   }
 
   /** Remove a line item from the user's cart by its optionId. Returns the
    *  mutation payload. Callers should RE-READ getCart to verify. */
   async deleteCartItem(args: DeleteCartItemArgs): Promise<Cart> {
     const batch = await this.request<CartMutationResponse[]>(buildDeleteCartItem(args), 'deleteCartItem');
-    return (batch?.[0]?.data ?? {}) as Cart;
+    return mutationData(batch, 'remove from cart');
   }
 
   /**
@@ -188,20 +188,28 @@ export class GrouponWebClient {
    * persisted hash, and refuses to blind-parse a non-JSON 2xx body.
    */
   private async request<T>(op: PersistedQueryOp, operationName: string): Promise<T> {
-    const buildInit = (cookie: string): RequestInit => ({
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'apollographql-client-name': CLIENT_NAME,
-        'x-operation-name': operationName,
-        Cookie: cookie,
-      },
-      body: JSON.stringify([op]),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    // Each attempt gets a FRESH timeout signal (fetchWithTimeout creates it),
+    // so the Retry-After retry never inherits a clock that ran down while we
+    // slept. Only the cookie is carried between attempts.
+    const send = (cookie: string): Promise<Response> =>
+      fetchWithTimeout(
+        this.fetchImpl,
+        this.endpoint,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'apollographql-client-name': CLIENT_NAME,
+            'x-operation-name': operationName,
+            Cookie: cookie,
+          },
+          body: JSON.stringify([op]),
+        },
+        SERVICE,
+      );
 
-    let init = buildInit(await this.requireCookie());
-    let res = await this.fetchImpl(this.endpoint, init);
+    let cookie = await this.requireCookie();
+    let res = await send(cookie);
 
     // A logged-out / expired session. When the cookie came from the browser it
     // is worth exactly one re-lift per request: the tab usually still holds a
@@ -215,8 +223,8 @@ export class GrouponWebClient {
     const settleAuthFailure = async (): Promise<Response> => {
       if (relifted || !this.invalidateLiftedCookie()) throw new SessionExpiredError();
       relifted = true;
-      init = buildInit(await this.requireCookie());
-      const replayed = await this.fetchImpl(this.endpoint, init);
+      cookie = await this.requireCookie();
+      const replayed = await send(cookie);
       if (replayed.status === 401 || replayed.status === 403) {
         // The re-lifted cookie is dead too — the user is signed out in the
         // browser. Drop it on the way out so the NEXT call re-reads the tab
@@ -238,7 +246,7 @@ export class GrouponWebClient {
         capMs: MAX_RETRY_AFTER_MS,
       });
       await this.sleep(delayMs);
-      res = await this.fetchImpl(this.endpoint, init);
+      res = await send(cookie);
       if (res.status === 401 || res.status === 403) {
         res = await settleAuthFailure();
       }
@@ -304,6 +312,30 @@ interface GetCartResponse {
 interface CartMutationResponse {
   data?: Cart;
   errors?: Array<{ message?: string }>;
+}
+
+/**
+ * Unwrap a cart mutation's batched response, refusing anything but a clean
+ * success. Groupon rejects a cart change it will not make (a quantity cap, a
+ * sold-out option, a per-customer limit) with HTTP 200 and a GraphQL `errors`
+ * array; returning `data ?? {}` turned that rejection into an apparent success
+ * that the purchase tool then reported as `added: true`.
+ */
+function mutationData(batch: CartMutationResponse[] | undefined, action: string): Cart {
+  const el = batch?.[0];
+  const messages = (Array.isArray(el?.errors) ? el.errors : [])
+    .map((e) => (typeof e?.message === 'string' && e.message ? e.message : 'unknown error'));
+  if (messages.length > 0) {
+    throw new McpToolError(`${SERVICE} rejected the ${action} request: ${messages.join('; ')}.`, {
+      hint: 'Nothing was changed. Check the option is still available and within any per-customer quantity limit (groupon_view_cart shows what is already in the cart).',
+    });
+  }
+  if (el?.data === undefined || el.data === null) {
+    throw new McpToolError(`${SERVICE} returned no result for the ${action} request.`, {
+      hint: 'The change may not have been applied. Check groupon_view_cart before retrying.',
+    });
+  }
+  return el.data;
 }
 
 /**

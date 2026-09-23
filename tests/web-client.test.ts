@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { McpToolError } from '@chrischall/mcp-utils';
 import { GrouponWebClient, SessionExpiredError } from '../src/web-client.js';
 import {
   GET_CART_HASH,
@@ -101,6 +102,34 @@ describe('GrouponWebClient', () => {
     expect(op.variables).toEqual({ optionId: 'opt-9' });
   });
 
+  it('addToCart surfaces a GraphQL error on a 200 instead of reporting success', async () => {
+    // Groupon rejects a cart change (quantity cap, sold out) with HTTP 200 and
+    // an `errors` array; returning `data ?? {}` made that look like success.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonRes(200, [{ data: { createOrUpdateCartItem: null }, errors: [{ message: 'quantity limit exceeded' }] }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client
+      .addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'ou', quantity: 3, isGift: false })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toMatch(/quantity limit exceeded/);
+  });
+
+  it('addToCart treats a response with no data as a failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [{ data: null }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(
+      client.addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'ou', quantity: 1, isGift: false }),
+    ).rejects.toBeInstanceOf(McpToolError);
+  });
+
+  it('deleteCartItem surfaces a GraphQL error on a 200', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [{ errors: [{ message: 'cart item not found' }] }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.deleteCartItem({ optionId: 'o' })).rejects.toThrow(/cart item not found/);
+  });
+
   it('throws SessionExpiredError on a 401', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: 'unauthorized' }));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
@@ -158,6 +187,30 @@ describe('GrouponWebClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(sleeps).toEqual([1000]);
     expect(cart).toEqual({ items: [], __typename: 'Cart' });
+  });
+
+  it('gives the Retry-After retry a FRESH timeout signal (the first may have fired while sleeping)', async () => {
+    const signals: AbortSignal[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      signals.push(init.signal as AbortSignal);
+      return signals.length === 1 ? jsonRes(429, {}, { 'retry-after': '30' }) : cartRes();
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.getCart();
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).not.toBe(signals[0]);
+  });
+
+  it('maps a request timeout to an actionable McpToolError, not a raw TimeoutError', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client.getCart().catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toMatch(/timed out/i);
   });
 });
 

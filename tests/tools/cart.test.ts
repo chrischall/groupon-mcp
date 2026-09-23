@@ -53,8 +53,8 @@ function harness(webClient: GrouponWebClient, readClient: GrouponClient) {
 }
 
 describe('resolveCartItem', () => {
-  it('defaults to the first option and maps deal.uuid + option id/uuid', () => {
-    expect(resolveCartItem(deal)).toMatchObject({
+  it('maps deal.uuid + the chosen option id/uuid and display fields', () => {
+    expect(resolveCartItem(deal, 'opt-a')).toMatchObject({
       dealUuid: 'deal-uuid-1',
       optionId: 'opt-a',
       optionUuid: 'opt-a-uuid',
@@ -64,6 +64,26 @@ describe('resolveCartItem', () => {
       strikeThroughPrice: { amount: 6000, currencyCode: 'USD' },
       discount: '-38%',
     });
+  });
+
+  it('defaults to the only option of a single-option deal', () => {
+    const single = { uuid: 'd', options: [{ id: 'o', uuid: 'ou', title: 'Only' }] } as unknown as GetDeal;
+    expect(resolveCartItem(single)).toMatchObject({ optionId: 'o', optionUuid: 'ou' });
+  });
+
+  it('refuses to guess an option on a multi-option deal, listing the ids + titles', () => {
+    // Silently picking options[0] put the wrong item in the cart whenever the
+    // caller meant a different option but had no id to pass.
+    expect(() => resolveCartItem(deal)).toThrow(/choose an option/i);
+    try {
+      resolveCartItem(deal);
+      throw new Error('expected resolveCartItem to throw');
+    } catch (e) {
+      const hint = (e as { hint?: string }).hint ?? '';
+      expect(hint).toMatch(/opt-a/);
+      expect(hint).toMatch(/opt-b/);
+      expect(hint).toMatch(/60-Minute/);
+    }
   });
 
   it('selects a requested option by id', () => {
@@ -134,6 +154,7 @@ describe('groupon_purchase', () => {
 
     const res = await h.callTool('groupon_purchase', {
       dealId: 'https://www.groupon.com/deals/versailles-massage-bar-1',
+      optionId: 'opt-a',
     });
 
     // getDeal (a READ) runs to resolve the option; the URL is stripped to a slug.
@@ -150,10 +171,22 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
+  it('errors (and mutates nothing) when optionId is omitted on a multi-option deal', async () => {
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', confirm: true });
+
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/opt-b/);
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
   it('CONFIRM: adds the item, re-reads the cart, and reports verified + checkout URL', async () => {
     const cartAfter = { items: [{ optionId: 'opt-b' }] };
     const { webClient, readClient, addToCart, getCart } = makeClients({
-      getCart: vi.fn().mockResolvedValue(cartAfter),
+      getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce(cartAfter),
     });
     const h = await harness(webClient, readClient);
 
@@ -172,14 +205,111 @@ describe('groupon_purchase', () => {
       quantity: 3,
       isGift: true,
     });
-    // Re-read to verify the add landed.
-    expect(getCart).toHaveBeenCalledTimes(1);
+    // Snapshot before + re-read after, to verify the add landed.
+    expect(getCart).toHaveBeenCalledTimes(2);
 
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data.added).toBe(true);
     expect(data.verified).toBe(true);
     expect(data.checkoutUrl).toBe('https://www.groupon.com/checkout/cart');
     expect(String(data.note)).toMatch(/cannot place the order/i);
+    await h.close();
+  });
+
+  it('does not report verified when the option was already in the cart and the quantity did not change', async () => {
+    // The add was a no-op (e.g. a per-customer cap) but the id was already
+    // present from earlier, so a presence-only check said verified: true.
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] });
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      quantity: 3,
+      confirm: true,
+    });
+
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data.verified).toBe(false);
+    expect(data.quantityInCart).toBe(1);
+    expect(String(data.note)).toMatch(/quantity/i);
+    await h.close();
+  });
+
+  it('verifies against the line quantity and reports it (incremented from an existing line)', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 4 }] });
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      quantity: 3,
+      confirm: true,
+    });
+
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data.verified).toBe(true);
+    expect(data.quantityInCart).toBe(4);
+    await h.close();
+  });
+
+  it('verifies a line whose quantity was set to the requested value', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 3 }] });
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      quantity: 3,
+      confirm: true,
+    });
+
+    expect(parseToolResult<Record<string, unknown>>(res)).toMatchObject({ verified: true, quantityInCart: 3 });
+    await h.close();
+  });
+
+  it('does not verify a pre-existing line with no readable quantity', async () => {
+    // Presence alone proves nothing when the item was there before the add.
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-b' }] });
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      confirm: true,
+    });
+
+    expect(parseToolResult<Record<string, unknown>>(res).verified).toBe(false);
+    await h.close();
+  });
+
+  it('surfaces a rejected add as a tool error, never as added:true', async () => {
+    const { McpToolError } = await import('@chrischall/mcp-utils');
+    const addToCart = vi.fn().mockRejectedValue(new McpToolError('Groupon cart rejected the change: quantity limit exceeded'));
+    const { webClient, readClient } = makeClients({ addToCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-b',
+      confirm: true,
+    });
+
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/quantity limit exceeded/);
     await h.close();
   });
 
@@ -219,7 +349,7 @@ describe('groupon_purchase', () => {
       ],
     };
     const { webClient, readClient } = makeClients({
-      getCart: vi.fn().mockResolvedValue(cartAfter),
+      getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce(cartAfter),
     });
     const h = await harness(webClient, readClient);
 
@@ -261,7 +391,7 @@ describe('groupon_purchase', () => {
     const { webClient, readClient } = makeClients({ getCart: vi.fn().mockResolvedValue({ items: [] }) });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', confirm: true });
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a', confirm: true });
 
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data.added).toBe(true);
