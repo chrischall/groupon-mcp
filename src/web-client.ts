@@ -171,14 +171,14 @@ export class GrouponWebClient {
       buildCreateOrUpdateCartItem(args),
       'createOrUpdateCartItem',
     );
-    return (batch?.[0]?.data ?? {}) as Cart;
+    return mutationData(batch, 'add to cart');
   }
 
   /** Remove a line item from the user's cart by its optionId. Returns the
    *  mutation payload. Callers should RE-READ getCart to verify. */
   async deleteCartItem(args: DeleteCartItemArgs): Promise<Cart> {
     const batch = await this.request<CartMutationResponse[]>(buildDeleteCartItem(args), 'deleteCartItem');
-    return (batch?.[0]?.data ?? {}) as Cart;
+    return mutationData(batch, 'remove from cart');
   }
 
   /**
@@ -312,6 +312,30 @@ interface GetCartResponse {
 interface CartMutationResponse {
   data?: Cart;
   errors?: Array<{ message?: string }>;
+}
+
+/**
+ * Unwrap a cart mutation's batched response, refusing anything but a clean
+ * success. Groupon rejects a cart change it will not make (a quantity cap, a
+ * sold-out option, a per-customer limit) with HTTP 200 and a GraphQL `errors`
+ * array; returning `data ?? {}` turned that rejection into an apparent success
+ * that the purchase tool then reported as `added: true`.
+ */
+function mutationData(batch: CartMutationResponse[] | undefined, action: string): Cart {
+  const el = batch?.[0];
+  const messages = (Array.isArray(el?.errors) ? el.errors : [])
+    .map((e) => (typeof e?.message === 'string' && e.message ? e.message : 'unknown error'));
+  if (messages.length > 0) {
+    throw new McpToolError(`${SERVICE} rejected the ${action} request: ${messages.join('; ')}.`, {
+      hint: 'Nothing was changed. Check the option is still available and within any per-customer quantity limit (groupon_view_cart shows what is already in the cart).',
+    });
+  }
+  if (el?.data === undefined || el.data === null) {
+    throw new McpToolError(`${SERVICE} returned no result for the ${action} request.`, {
+      hint: 'The change may not have been applied. Check groupon_view_cart before retrying.',
+    });
+  }
+  return el.data;
 }
 
 /**

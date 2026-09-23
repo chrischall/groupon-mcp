@@ -125,6 +125,63 @@ function cartHasValue(node: unknown, target: string): boolean {
   return walk(node);
 }
 
+/**
+ * Total line quantity for `optionId` in a cart payload: the sum of the numeric
+ * `quantity` (or `qty`) on every object that carries the id as one of its own
+ * values. `undefined` when no such line exposes a numeric quantity — the
+ * authenticated cart shape is not otherwise modelled. Cycle-safe.
+ */
+export function cartLineQuantity(cart: unknown, optionId: string): number | undefined {
+  let total: number | undefined;
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    if (seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) {
+      n.forEach(walk);
+      return;
+    }
+    const o = n as Record<string, unknown>;
+    const qty = typeof o.quantity === "number" ? o.quantity : o.qty;
+    if (typeof qty === "number" && Object.values(o).includes(optionId)) {
+      total = (total ?? 0) + qty;
+    }
+    Object.values(o).forEach(walk);
+  };
+  walk(cart);
+  return total;
+}
+
+/**
+ * Did the add land as requested? Compares a before/after cart snapshot rather
+ * than asking whether the id is present at all: an option already in the cart
+ * is "present" whether or not this add changed anything, so presence alone
+ * reported a no-op add as verified.
+ *
+ * With readable line quantities, the after-quantity must be the requested one
+ * (update-to semantics) or the old one plus the request (increment semantics);
+ * `createOrUpdateCartItem` is not documented either way. Without them, only a
+ * line that was absent before and present after counts.
+ */
+function verifyAdd(
+  before: unknown,
+  after: unknown,
+  optionId: string,
+  quantity: number,
+): { verified: boolean; quantityInCart: number | undefined } {
+  const presentBefore = cartContainsOptionId(before, optionId);
+  const presentAfter = cartContainsOptionId(after, optionId);
+  const qtyAfter = presentAfter ? cartLineQuantity(after, optionId) : undefined;
+  if (!presentAfter) return { verified: false, quantityInCart: qtyAfter };
+  if (qtyAfter === undefined) return { verified: !presentBefore, quantityInCart: undefined };
+  const qtyBefore = presentBefore ? (cartLineQuantity(before, optionId) ?? 0) : 0;
+  return {
+    verified: qtyAfter === quantity || qtyAfter === qtyBefore + quantity,
+    quantityInCart: qtyAfter,
+  };
+}
+
 /** The ids + display fields resolved from a getDeal read for a cart add. */
 export interface ResolvedCartItem {
   dealUuid: string;
@@ -272,7 +329,7 @@ export function registerCartTools(
       description:
         "Add a Groupon deal option to your cart, ready for checkout. WITHOUT confirm:true this is a DRY RUN — it " +
         "previews what would be added and makes NO change to your cart. WITH confirm:true it adds the item, re-reads " +
-        "the cart to verify, and returns the checkout URL for YOU to complete payment. It CANNOT place the order — " +
+        "the cart to verify the line quantity, and returns the checkout URL for YOU to complete payment. It CANNOT place the order — " +
         "Groupon checkout is native Apple/Google Pay, card, or PayPal.",
       annotations: toolAnnotations({
         title: "Add a Groupon deal to your cart",
@@ -325,6 +382,10 @@ export function registerCartTools(
         );
       }
 
+      // Snapshot the cart first, so verification can tell a real change from
+      // an option that was already there. A rejected add throws (see
+      // GrouponWebClient.addToCart) rather than returning.
+      const before = await webClient.getCart();
       await webClient.addToCart({
         optionId: resolved.optionId,
         dealUuid: resolved.dealUuid,
@@ -334,8 +395,24 @@ export function registerCartTools(
       });
       // Re-read the cart to confirm the item actually landed — an accepted
       // mutation is not proof it persisted.
-      const cart = await webClient.getCart();
-      const verified = cartContainsOptionId(cart, resolved.optionId);
+      const after = await webClient.getCart();
+      const { verified, quantityInCart } = verifyAdd(
+        before,
+        after,
+        resolved.optionId,
+        quantity,
+      );
+
+      let note: string;
+      if (verified) {
+        note =
+          "Item added to your Groupon cart. Open the checkout URL and complete payment (Apple/Google Pay, card, or PayPal) yourself — this tool cannot place the order.";
+      } else if (quantityInCart !== undefined) {
+        note = `Groupon accepted the add-to-cart request, but the cart re-read shows quantity ${quantityInCart} for this option, not the ${quantity} requested. Open the checkout URL to check your cart before paying — this tool cannot place the order.`;
+      } else {
+        note =
+          "Groupon accepted the add-to-cart request, but a cart re-read did not confirm the item is present with the requested quantity. Open the checkout URL to check your cart before paying — this tool cannot place the order.";
+      }
 
       return minifiedResult({
         added: true,
@@ -344,10 +421,9 @@ export function registerCartTools(
         option: resolved.optionTitle,
         optionId: resolved.optionId,
         quantity,
+        ...(quantityInCart !== undefined ? { quantityInCart } : {}),
         checkoutUrl: CHECKOUT_URL,
-        note: verified
-          ? "Item added to your Groupon cart. Open the checkout URL and complete payment (Apple/Google Pay, card, or PayPal) yourself — this tool cannot place the order."
-          : "Groupon accepted the add-to-cart request, but a cart re-read did not confirm the item is present. Open the checkout URL to check your cart before paying — this tool cannot place the order.",
+        note,
       });
     },
   );

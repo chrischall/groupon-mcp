@@ -102,6 +102,34 @@ describe('GrouponWebClient', () => {
     expect(op.variables).toEqual({ optionId: 'opt-9' });
   });
 
+  it('addToCart surfaces a GraphQL error on a 200 instead of reporting success', async () => {
+    // Groupon rejects a cart change (quantity cap, sold out) with HTTP 200 and
+    // an `errors` array; returning `data ?? {}` made that look like success.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonRes(200, [{ data: { createOrUpdateCartItem: null }, errors: [{ message: 'quantity limit exceeded' }] }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client
+      .addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'ou', quantity: 3, isGift: false })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toMatch(/quantity limit exceeded/);
+  });
+
+  it('addToCart treats a response with no data as a failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [{ data: null }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(
+      client.addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'ou', quantity: 1, isGift: false }),
+    ).rejects.toBeInstanceOf(McpToolError);
+  });
+
+  it('deleteCartItem surfaces a GraphQL error on a 200', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [{ errors: [{ message: 'cart item not found' }] }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.deleteCartItem({ optionId: 'o' })).rejects.toThrow(/cart item not found/);
+  });
+
   it('throws SessionExpiredError on a 401', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: 'unauthorized' }));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
