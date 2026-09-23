@@ -139,8 +139,9 @@ export interface ResolvedCartItem {
 
 /**
  * Resolve the createOrUpdateCartItem ids from a getDeal payload. `deal.uuid` is
- * the dealUuid; the chosen option's `id`/`uuid` are the optionId/optionUuid. When
- * `requestedOptionId` is omitted the first option is used; when provided it must
+ * the dealUuid; the chosen option's `id`/`uuid` are the optionId/optionUuid.
+ * `requestedOptionId` may be omitted only for a single-option deal (a
+ * multi-option deal throws, listing the choices); when provided it must
  * match an option's `id` or `uuid`. Throws an actionable {@link McpToolError} on
  * a missing/sold-out option or a drifted response shape.
  */
@@ -177,12 +178,28 @@ export function resolveCartItem(
       throw new McpToolError(
         `Option "${requestedOptionId}" was not found on this deal.`,
         {
-          hint: `Available option ids: ${available.join(", ") || "(none)"}. Omit optionId to use the first option.`,
+          hint: `Available option ids: ${available.join(", ") || "(none)"}.`,
         },
       );
     }
-  } else {
+  } else if (options.length === 1) {
     option = options[0];
+  } else {
+    // Never guess on a multi-option deal: defaulting to options[0] put a
+    // different item in the cart whenever the caller meant another option.
+    const available = options
+      .map((o) =>
+        typeof o?.id === "string"
+          ? `${o.id}${typeof o.title === "string" ? ` (${o.title})` : ""}`
+          : undefined,
+      )
+      .filter((x): x is string => x !== undefined);
+    throw new McpToolError(
+      `This deal has ${options.length} options — choose an option by passing optionId.`,
+      {
+        hint: `Available options: ${available.join("; ") || "(none)"}. groupon_get_deal lists each option's id, title and price.`,
+      },
+    );
   }
 
   const optionId = option.id;
@@ -270,7 +287,7 @@ export function registerCartTools(
           .string()
           .optional()
           .describe(
-            "Which deal option to buy (an option id from groupon_get_deal). Defaults to the first option.",
+            "Which deal option to buy (an option id from groupon_get_deal). Required when the deal has more than one option; may be omitted for a single-option deal.",
           ),
         quantity: PositiveInt.default(1).describe(
           "How many to add (default 1).",
