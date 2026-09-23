@@ -449,6 +449,33 @@ describe('groupon_clear_cart', () => {
     await h.close();
   });
 
+  it('CONFIRM: a delete failing partway reports which lines were already removed', async () => {
+    const { McpToolError } = await import('@chrischall/mcp-utils');
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }, { optionId: 'opt-c' }] });
+    const deleteCartItem = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(
+        new McpToolError('Groupon rejected the remove from cart request: cart item not found.', {
+          hint: 'The rejected change to this item was not applied.',
+        }),
+      );
+    const { webClient, readClient } = makeClients({ getCart, deleteCartItem });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_clear_cart', { confirm: true });
+
+    expect(res.isError).toBe(true);
+    expect(deleteCartItem).toHaveBeenCalledTimes(2); // stops at the failure
+    const text = JSON.stringify(res.content);
+    expect(text).toMatch(/cart item not found/);
+    expect(text).toMatch(/1 of 3/);
+    expect(text).toMatch(/removed: opt-a/);
+    expect(text).toMatch(/still in the cart: opt-b, opt-c/);
+    expect(text).not.toMatch(/Nothing was changed/);
+    await h.close();
+  });
+
   it('short-circuits an already-empty cart with no confirm and no deletes', async () => {
     const { webClient, readClient, deleteCartItem } = makeClients({ getCart: vi.fn().mockResolvedValue({ items: [] }) });
     const h = await harness(webClient, readClient);

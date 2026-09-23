@@ -130,6 +130,17 @@ describe('GrouponWebClient', () => {
     await expect(client.deleteCartItem({ optionId: 'o' })).rejects.toThrow(/cart item not found/);
   });
 
+  it('scopes a rejected mutation hint to the one item, not the whole cart', async () => {
+    // groupon_clear_cart deletes line by line, so a rejection partway through
+    // follows removals that already happened: "Nothing was changed" was wrong.
+    const fetchImpl = vi.fn().mockResolvedValue(jsonRes(200, [{ errors: [{ message: 'cart item not found' }] }]));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client.deleteCartItem({ optionId: 'o' }).catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.hint).not.toMatch(/Nothing was changed/);
+    expect(err.hint).toMatch(/this item/i);
+  });
+
   it('throws SessionExpiredError on a 401', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: 'unauthorized' }));
     const client = makeClient(fetchImpl as unknown as typeof fetch);

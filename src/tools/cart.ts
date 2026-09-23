@@ -462,8 +462,27 @@ export function registerCartTools(
         );
       }
 
+      const removedIds: string[] = [];
       for (const id of optionIds) {
-        await webClient.deleteCartItem({ optionId: id });
+        try {
+          await webClient.deleteCartItem({ optionId: id });
+        } catch (err) {
+          // Lines are removed one at a time, so a failure partway through leaves
+          // the earlier removals applied: say exactly which lines went and which
+          // are still there rather than implying nothing changed.
+          const message = err instanceof Error ? err.message : String(err);
+          const stillThere = optionIds.slice(removedIds.length);
+          throw new McpToolError(
+            `Cleared ${removedIds.length} of ${optionIds.length} cart lines before a removal failed: ${message}`,
+            {
+              hint:
+                (removedIds.length > 0 ? `Already removed: ${removedIds.join(", ")}. ` : "No lines were removed. ") +
+                `Possibly still in the cart: ${stillThere.join(", ")}. Check groupon_view_cart before retrying.`,
+              cause: err,
+            },
+          );
+        }
+        removedIds.push(id);
       }
       const after = await webClient.getCart();
       const remaining = collectCartOptionIds(after);

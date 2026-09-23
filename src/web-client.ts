@@ -327,7 +327,7 @@ function mutationData(batch: CartMutationResponse[] | undefined, action: string)
     .map((e) => (typeof e?.message === 'string' && e.message ? e.message : 'unknown error'));
   if (messages.length > 0) {
     throw new McpToolError(`${SERVICE} rejected the ${action} request: ${messages.join('; ')}.`, {
-      hint: 'Nothing was changed. Check the option is still available and within any per-customer quantity limit (groupon_view_cart shows what is already in the cart).',
+      hint: 'The rejected change to this item was not applied. Check the option is still available and within any per-customer quantity limit (groupon_view_cart shows what is already in the cart).',
     });
   }
   if (el?.data === undefined || el.data === null) {
