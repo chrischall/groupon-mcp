@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/chrischall/groupon-mcp/compare/v1.0.0...v1.0.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deps:** require zod ^4.6.5 to match @chrischall/mcp-utils 2.4.0 ([#102](https://github.com/chrischall/groupon-mcp/issues/102)) ([e80d786](https://github.com/chrischall/groupon-mcp/commit/e80d78619e572eb9e1a228b1c10d3b50ed2357de))
+* **deps:** upgrade @chrischall/mcp-utils to 2.4.0 and @fetchproxy/* to 3.2.0 ([#100](https://github.com/chrischall/groupon-mcp/issues/100)) ([20ff2a0](https://github.com/chrischall/groupon-mcp/commit/20ff2a0468d4a3a85c7ed838283cf3c5249c348d))
+
 ## [1.0.0](https://github.com/chrischall/groupon-mcp/compare/v0.4.0...v1.0.0) (2026-09-20)
 
 
