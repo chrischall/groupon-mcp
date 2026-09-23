@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/chrischall/groupon-mcp/compare/v1.0.1...v1.0.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **cart:** report which lines were already removed when clear_cart fails partway ([#106](https://github.com/chrischall/groupon-mcp/issues/106)) ([d57bce4](https://github.com/chrischall/groupon-mcp/commit/d57bce4142a49057d2f25d81cbcfa456e50ecd3d)), closes [#104](https://github.com/chrischall/groupon-mcp/issues/104)
+* stop false cart-add success, show option ids in get_deal, and give rate-limit retries a fresh timeout ([#103](https://github.com/chrischall/groupon-mcp/issues/103)) ([8c8fc6c](https://github.com/chrischall/groupon-mcp/commit/8c8fc6c510f72e030d77a5dc2b2da7ed14a889b5))
+
 ## [1.0.1](https://github.com/chrischall/groupon-mcp/compare/v1.0.0...v1.0.1) (2026-09-23)
 
 
