@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { McpToolError } from '@chrischall/mcp-utils';
 import { GrouponWebClient, SessionExpiredError } from '../src/web-client.js';
 import {
   GET_CART_HASH,
@@ -158,6 +159,30 @@ describe('GrouponWebClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(sleeps).toEqual([1000]);
     expect(cart).toEqual({ items: [], __typename: 'Cart' });
+  });
+
+  it('gives the Retry-After retry a FRESH timeout signal (the first may have fired while sleeping)', async () => {
+    const signals: AbortSignal[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      signals.push(init.signal as AbortSignal);
+      return signals.length === 1 ? jsonRes(429, {}, { 'retry-after': '30' }) : cartRes();
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await client.getCart();
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).not.toBe(signals[0]);
+  });
+
+  it('maps a request timeout to an actionable McpToolError, not a raw TimeoutError', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client.getCart().catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toMatch(/timed out/i);
   });
 });
 

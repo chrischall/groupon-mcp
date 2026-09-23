@@ -17,6 +17,7 @@ import {
   type BrowseDealFeedArgs,
   type GetDealArgs,
 } from './graphql-ops.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 // Load .env for local dev; silently skip if dotenv is unavailable (e.g. the
 // .mcpb bundle). loadDotenvSafely never lets .env override a host-provided value.
@@ -41,8 +42,6 @@ const SERVICE = 'Groupon GraphQL';
 // Groupon's web client identifies itself with this Apollo client-name header;
 // the endpoint expects it alongside a JSON content type.
 const CLIENT_NAME = 'mobilenextapi';
-// Deal feeds return in a couple of seconds; 30s leaves slack without hanging a host.
-const REQUEST_TIMEOUT_MS = 30_000;
 // Deal listings change slowly relative to a single agent session; a short-TTL
 // response cache absorbs an agent re-issuing the same browse/search. Override
 // with GROUPON_CACHE_TTL (seconds; 0 = off).
@@ -186,17 +185,20 @@ export class GrouponClient {
   private async request<T>(batch: unknown[]): Promise<T> {
     this.requireReadable();
     const method = 'POST';
-    const init: RequestInit = {
-      method,
-      headers: {
-        'content-type': 'application/json',
-        'apollographql-client-name': CLIENT_NAME,
-      },
-      body: JSON.stringify(batch),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    };
+    // A FRESH init per attempt: the timeout clock starts when the signal is
+    // created, so reusing one across the Retry-After sleep (up to 30s) would
+    // abort the retry before it was even sent.
+    const send = (): Promise<Response> =>
+      fetchWithTimeout(this.fetchImpl, this.endpoint, {
+        method,
+        headers: {
+          'content-type': 'application/json',
+          'apollographql-client-name': CLIENT_NAME,
+        },
+        body: JSON.stringify(batch),
+      }, SERVICE);
 
-    let res = await this.fetchImpl(this.endpoint, init);
+    let res = await send();
     // Groupon signals throttling / transient unavailability with 429 / 503.
     // Honor Retry-After once, capped so a tool call never sleeps unreasonably long.
     if (res.status === 429 || res.status === 503) {
@@ -205,7 +207,7 @@ export class GrouponClient {
         capMs: MAX_RETRY_AFTER_MS,
       });
       await this.sleep(delayMs);
-      res = await this.fetchImpl(this.endpoint, init);
+      res = await send();
     }
 
     const text = await res.text();

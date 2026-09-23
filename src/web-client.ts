@@ -12,6 +12,7 @@ import {
   type DeleteCartItemArgs,
   type PersistedQueryOp,
 } from './graphql-ops.js';
+import { fetchWithTimeout } from './fetch-timeout.js';
 
 // Groupon's consumer GraphQL endpoint — the SAME host the anonymous reads use,
 // but the cart ops require the user's authenticated SESSION COOKIE. Verified
@@ -21,7 +22,6 @@ import {
 const DEFAULT_ENDPOINT = 'https://www.groupon.com/mobilenextapi/graphql';
 const SERVICE = 'Groupon cart';
 const CLIENT_NAME = 'mobilenextapi';
-const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRY_AFTER_MS = 30_000;
 
 /**
@@ -188,20 +188,28 @@ export class GrouponWebClient {
    * persisted hash, and refuses to blind-parse a non-JSON 2xx body.
    */
   private async request<T>(op: PersistedQueryOp, operationName: string): Promise<T> {
-    const buildInit = (cookie: string): RequestInit => ({
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'apollographql-client-name': CLIENT_NAME,
-        'x-operation-name': operationName,
-        Cookie: cookie,
-      },
-      body: JSON.stringify([op]),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    // Each attempt gets a FRESH timeout signal (fetchWithTimeout creates it),
+    // so the Retry-After retry never inherits a clock that ran down while we
+    // slept. Only the cookie is carried between attempts.
+    const send = (cookie: string): Promise<Response> =>
+      fetchWithTimeout(
+        this.fetchImpl,
+        this.endpoint,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'apollographql-client-name': CLIENT_NAME,
+            'x-operation-name': operationName,
+            Cookie: cookie,
+          },
+          body: JSON.stringify([op]),
+        },
+        SERVICE,
+      );
 
-    let init = buildInit(await this.requireCookie());
-    let res = await this.fetchImpl(this.endpoint, init);
+    let cookie = await this.requireCookie();
+    let res = await send(cookie);
 
     // A logged-out / expired session. When the cookie came from the browser it
     // is worth exactly one re-lift per request: the tab usually still holds a
@@ -215,8 +223,8 @@ export class GrouponWebClient {
     const settleAuthFailure = async (): Promise<Response> => {
       if (relifted || !this.invalidateLiftedCookie()) throw new SessionExpiredError();
       relifted = true;
-      init = buildInit(await this.requireCookie());
-      const replayed = await this.fetchImpl(this.endpoint, init);
+      cookie = await this.requireCookie();
+      const replayed = await send(cookie);
       if (replayed.status === 401 || replayed.status === 403) {
         // The re-lifted cookie is dead too — the user is signed out in the
         // browser. Drop it on the way out so the NEXT call re-reads the tab
@@ -238,7 +246,7 @@ export class GrouponWebClient {
         capMs: MAX_RETRY_AFTER_MS,
       });
       await this.sleep(delayMs);
-      res = await this.fetchImpl(this.endpoint, init);
+      res = await send(cookie);
       if (res.status === 401 || res.status === 403) {
         res = await settleAuthFailure();
       }
