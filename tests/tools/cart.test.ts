@@ -599,6 +599,59 @@ describe('groupon_clear_cart', () => {
     await h.close();
   });
 
+  // The same gate wiring as groupon_purchase, covered the same way (#108). The
+  // cart stays non-empty throughout: an empty cart short-circuits before the
+  // gate, so a replay against one would never reach the token check.
+  const nonEmptyCart = () => vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }] });
+
+  it('refuses a replayed confirmToken with TOKEN_REUSED and does not delete again', async () => {
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart: nonEmptyCart() });
+    const h = await harness(webClient, readClient);
+
+    const { confirmToken } = await phaseOne(h, 'groupon_clear_cart', {});
+    await h.callTool('groupon_clear_cart', { confirmToken });
+    expect(deleteCartItem).toHaveBeenCalledTimes(1);
+
+    const replay = await h.callTool('groupon_clear_cart', { confirmToken });
+    expect(replay.isError).toBe(true);
+    expect(parseToolResult<Json>(replay).error).toBe('TOKEN_REUSED');
+    expect(deleteCartItem).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('clears after an accepted elicitation prompt (a client that can be asked)', async () => {
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart: nonEmptyCart() });
+    const h = await harness(webClient, readClient, async () => ({ action: 'accept', content: { confirmed: true } }));
+
+    const res = await h.callTool('groupon_clear_cart', {});
+
+    expect(res.isError).toBeFalsy();
+    expect(deleteCartItem).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('does not clear when the elicitation prompt is declined', async () => {
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart: nonEmptyCart() });
+    const h = await harness(webClient, readClient, async () => ({ action: 'decline' }));
+
+    await h.callTool('groupon_clear_cart', {});
+
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('MCP_CONFIRM_MODE=refuse refuses on a client that cannot be prompted', async () => {
+    process.env.MCP_CONFIRM_MODE = 'refuse';
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart: nonEmptyCart() });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_clear_cart', {});
+
+    expect(parseToolResult<Json>(res).reason).toBe('confirmation-unsupported');
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    await h.close();
+  });
+
   it('CONFIRMED: deletes each line item, re-reads, and verifies empty', async () => {
     const getCart = vi
       .fn()
