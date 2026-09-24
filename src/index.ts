@@ -9,7 +9,7 @@ import { registerDetailTools } from './tools/detail.js';
 import { registerCartTools } from './tools/cart.js';
 
 // The full STDIO server: the anonymous read tools (healthcheck, deal
-// search/browse, deal detail, category taxonomy) PLUS the confirm-gated cart /
+// search/browse, deal detail, category taxonomy) PLUS the confirmation-gated cart /
 // purchase path (view / add-to-cart / clear). The cart tools authenticate with
 // the user's Groupon session cookie via `webClient`; they resolve deal option
 // ids through the anonymous read `client`. Deferred-config: reads still boot

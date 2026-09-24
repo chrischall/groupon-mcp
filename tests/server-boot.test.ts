@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 // eager-import crash in the bundle (no node_modules) and a wrong `bin` path.
 //
 // The full STDIO server registers the read tools (healthcheck, search, deal
-// detail, categories) PLUS the confirm-gated cart path (view / purchase /
+// detail, categories) PLUS the confirmation-gated cart path (view / purchase /
 // clear) — 7 tools. This asserts the built artifacts boot and list them. The
 // cart tools register with no credential (deferred config): the cookie/
 // fetchproxy tree is a LAZY import reached only on the first cart CALL, so the
