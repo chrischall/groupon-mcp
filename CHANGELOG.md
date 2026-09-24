@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/chrischall/groupon-mcp/compare/v1.0.2...v1.1.0) (2026-09-24)
+
+
+### Features
+
+* confirm writes with a preview token instead of confirm: true ([#107](https://github.com/chrischall/groupon-mcp/issues/107)) ([63de30c](https://github.com/chrischall/groupon-mcp/commit/63de30cda2cd336114388f5cd23f130e8593d549))
+
 ## [1.0.2](https://github.com/chrischall/groupon-mcp/compare/v1.0.1...v1.0.2) (2026-09-23)
 
 
