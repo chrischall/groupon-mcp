@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { createTestHarness, parseToolResult } from '@chrischall/mcp-utils/test';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
+import type { ElicitResult } from '@modelcontextprotocol/server';
 import { registerCartTools, resolveCartItem, collectCartOptionIds } from '../../src/tools/cart.js';
 import type { GrouponClient, GetDeal } from '../../src/client.js';
 import type { GrouponWebClient } from '../../src/web-client.js';
@@ -48,9 +49,49 @@ function makeClients(over: {
   return { webClient, readClient, getCart, addToCart, deleteCartItem, getDeal };
 }
 
-function harness(webClient: GrouponWebClient, readClient: GrouponClient) {
-  return createTestHarness((s) => registerCartTools(s, webClient, readClient));
+/**
+ * A harness with no elicitation handler is a client that cannot show a
+ * confirmation prompt (claude.ai / Claude Desktop): under the default
+ * MCP_CONFIRM_MODE=ask-user every write goes through the two-phase token flow.
+ */
+function harness(
+  webClient: GrouponWebClient,
+  readClient: GrouponClient,
+  elicitation?: () => ElicitResult | Promise<ElicitResult>,
+) {
+  return createTestHarness(
+    (s) => registerCartTools(s, webClient, readClient),
+    elicitation ? { elicitation } : {},
+  );
 }
+
+type Json = Record<string, unknown>;
+
+/** Phase 1: call without a token; must be a no-op preview carrying a token. */
+async function phaseOne(h: TestHarness, tool: string, args: Json): Promise<Json> {
+  const res = await h.callTool(tool, args);
+  expect(res.isError).toBeFalsy();
+  const data = parseToolResult<Json>(res);
+  expect(data.status).toBe('confirmation-required');
+  expect(data.dispatched).toBe(false);
+  expect(typeof data.confirmToken).toBe('string');
+  return data;
+}
+
+/** Both phases: preview, then the same call with the returned confirmToken. */
+async function confirmed(h: TestHarness, tool: string, args: Json = {}) {
+  const { confirmToken } = await phaseOne(h, tool, args);
+  return h.callTool(tool, { ...args, confirmToken });
+}
+
+const ENV_KEYS = ['MCP_CONFIRM_MODE', 'MCP_CONFIRM_TTL_SECONDS', 'MCP_CONFIRM_SECRET'] as const;
+const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+afterEach(() => {
+  for (const k of ENV_KEYS) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
+});
 
 describe('resolveCartItem', () => {
   it('maps deal.uuid + the chosen option id/uuid and display fields', () => {
@@ -148,26 +189,141 @@ describe('groupon_view_cart', () => {
 });
 
 describe('groupon_purchase', () => {
-  it('DRY RUN: resolves via getDeal, previews, and makes NO cart mutation', async () => {
+  it('PHASE 1: resolves via getDeal, previews with a confirmToken, and makes NO cart mutation', async () => {
     const { webClient, readClient, getDeal, addToCart, getCart } = makeClients();
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const data = await phaseOne(h, 'groupon_purchase', {
       dealId: 'https://www.groupon.com/deals/versailles-massage-bar-1',
       optionId: 'opt-a',
     });
 
     // getDeal (a READ) runs to resolve the option; the URL is stripped to a slug.
     expect(getDeal.mock.calls[0][0]).toEqual({ dealId: 'versailles-massage-bar-1' });
-    // NO mutation on the dry-run path.
+    // NO mutation on the preview path.
     expect(addToCart).not.toHaveBeenCalled();
     expect(getCart).not.toHaveBeenCalled();
 
-    const data = parseToolResult<Record<string, unknown>>(res);
-    expect(data.preview).toBe(true);
-    expect(data.optionId).toBe('opt-a');
-    expect(data.quantity).toBe(1);
-    expect(data.price).toEqual({ amount: 3700, currencyCode: 'USD' });
+    expect(data.action).toBe('groupon.purchase');
+    const preview = data.preview as Json;
+    expect(preview).toMatchObject({
+      deal: 'Versailles Massage Bar',
+      option: 'One 30-Minute Deep-Tissue Massage',
+      optionId: 'opt-a',
+      quantity: 1,
+      isGift: false,
+      price: { amount: 3700, currencyCode: 'USD' },
+      strikeThroughPrice: { amount: 6000, currencyCode: 'USD' },
+      discount: '-38%',
+    });
+    expect(String(preview.note)).toMatch(/checkout URL/i);
+    await h.close();
+  });
+
+  it('PHASE 2: the returned confirmToken performs the add exactly once', async () => {
+    const { webClient, readClient, addToCart } = makeClients({
+      getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] }),
+    });
+    const h = await harness(webClient, readClient);
+    const args = { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' };
+
+    const { confirmToken } = await phaseOne(h, 'groupon_purchase', args);
+    expect(addToCart).not.toHaveBeenCalled();
+    const res = await h.callTool('groupon_purchase', { ...args, confirmToken });
+
+    expect(addToCart).toHaveBeenCalledTimes(1);
+    expect(parseToolResult<Json>(res)).toMatchObject({ added: true, verified: true });
+    await h.close();
+  });
+
+  it('refuses a replayed confirmToken with TOKEN_REUSED and does not add again', async () => {
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient);
+    const args = { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' };
+
+    const { confirmToken } = await phaseOne(h, 'groupon_purchase', args);
+    await h.callTool('groupon_purchase', { ...args, confirmToken });
+    expect(addToCart).toHaveBeenCalledTimes(1);
+
+    const replay = await h.callTool('groupon_purchase', { ...args, confirmToken });
+    expect(replay.isError).toBe(true);
+    expect(parseToolResult<Json>(replay).error).toBe('TOKEN_REUSED');
+    expect(addToCart).toHaveBeenCalledTimes(1);
+    await h.close();
+  });
+
+  it('refuses a token whose arguments changed between phases with DRAFT_CHANGED', async () => {
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient);
+
+    const { confirmToken } = await phaseOne(h, 'groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-a',
+    });
+    const res = await h.callTool('groupon_purchase', {
+      dealId: 'versailles-massage-bar-1',
+      optionId: 'opt-a',
+      quantity: 5,
+      confirmToken,
+    });
+
+    expect(res.isError).toBe(true);
+    const data = parseToolResult<Json>(res);
+    expect(data.error).toBe('DRAFT_CHANGED');
+    expect((data.preview as Json).quantity).toBe(5);
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('refuses with DRAFT_CHANGED when the deal price changed between phases', async () => {
+    const repriced = {
+      ...deal,
+      options: [{ ...(deal.options as Json[])[0], unformattedPrice: { amount: 4500, currencyCode: 'USD' } }],
+    } as unknown as GetDeal;
+    const getDeal = vi.fn().mockResolvedValueOnce(deal).mockResolvedValueOnce(repriced);
+    const { webClient, readClient, addToCart } = makeClients({ getDeal });
+    const h = await harness(webClient, readClient);
+    const args = { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' };
+
+    const { confirmToken } = await phaseOne(h, 'groupon_purchase', args);
+    const res = await h.callTool('groupon_purchase', { ...args, confirmToken });
+
+    expect(parseToolResult<Json>(res).error).toBe('DRAFT_CHANGED');
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('adds after an accepted elicitation prompt (a client that can be asked)', async () => {
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient, async () => ({ action: 'accept', content: { confirmed: true } }));
+
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
+
+    expect(res.isError).toBeFalsy();
+    expect(addToCart).toHaveBeenCalledTimes(1);
+    expect(parseToolResult<Json>(res).added).toBe(true);
+    await h.close();
+  });
+
+  it('does not add when the elicitation prompt is declined', async () => {
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient, async () => ({ action: 'decline' }));
+
+    await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
+
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('MCP_CONFIRM_MODE=refuse refuses on a client that cannot be prompted', async () => {
+    process.env.MCP_CONFIRM_MODE = 'refuse';
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
+
+    expect(parseToolResult<Json>(res).reason).toBe('confirmation-unsupported');
+    expect(addToCart).not.toHaveBeenCalled();
     await h.close();
   });
 
@@ -175,7 +331,7 @@ describe('groupon_purchase', () => {
     const { webClient, readClient, addToCart } = makeClients();
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', confirm: true });
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1' });
 
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toMatch(/opt-b/);
@@ -183,19 +339,18 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
-  it('CONFIRM: adds the item, re-reads the cart, and reports verified + checkout URL', async () => {
+  it('CONFIRMED: adds the item, re-reads the cart, and reports verified + checkout URL', async () => {
     const cartAfter = { items: [{ optionId: 'opt-b' }] };
     const { webClient, readClient, addToCart, getCart } = makeClients({
       getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce(cartAfter),
     });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
       quantity: 3,
       isGift: true,
-      confirm: true,
     });
 
     expect(addToCart).toHaveBeenCalledWith({
@@ -226,11 +381,10 @@ describe('groupon_purchase', () => {
     const { webClient, readClient } = makeClients({ getCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
       quantity: 3,
-      confirm: true,
     });
 
     const data = parseToolResult<Record<string, unknown>>(res);
@@ -248,11 +402,10 @@ describe('groupon_purchase', () => {
     const { webClient, readClient } = makeClients({ getCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
       quantity: 3,
-      confirm: true,
     });
 
     const data = parseToolResult<Record<string, unknown>>(res);
@@ -269,11 +422,10 @@ describe('groupon_purchase', () => {
     const { webClient, readClient } = makeClients({ getCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
       quantity: 3,
-      confirm: true,
     });
 
     expect(parseToolResult<Record<string, unknown>>(res)).toMatchObject({ verified: true, quantityInCart: 3 });
@@ -286,10 +438,9 @@ describe('groupon_purchase', () => {
     const { webClient, readClient } = makeClients({ getCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
-      confirm: true,
     });
 
     expect(parseToolResult<Record<string, unknown>>(res).verified).toBe(false);
@@ -302,10 +453,9 @@ describe('groupon_purchase', () => {
     const { webClient, readClient } = makeClients({ addToCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
-      confirm: true,
     });
 
     expect(res.isError).toBe(true);
@@ -327,10 +477,9 @@ describe('groupon_purchase', () => {
     });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
-      confirm: true,
     });
 
     const data = parseToolResult<Record<string, unknown>>(res);
@@ -353,10 +502,9 @@ describe('groupon_purchase', () => {
     });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
-      confirm: true,
     });
 
     expect(parseToolResult<Record<string, unknown>>(res).verified).toBe(true);
@@ -376,10 +524,9 @@ describe('groupon_purchase', () => {
     });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', {
+    const res = await confirmed(h, 'groupon_purchase', {
       dealId: 'versailles-massage-bar-1',
       optionId: 'opt-b',
-      confirm: true,
     });
 
     const data = parseToolResult<Record<string, unknown>>(res);
@@ -387,11 +534,11 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
-  it('CONFIRM: reports verified=false when the re-read does not show the item', async () => {
+  it('CONFIRMED: reports verified=false when the re-read does not show the item', async () => {
     const { webClient, readClient } = makeClients({ getCart: vi.fn().mockResolvedValue({ items: [] }) });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a', confirm: true });
+    const res = await confirmed(h, 'groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
 
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data.added).toBe(true);
@@ -402,54 +549,87 @@ describe('groupon_purchase', () => {
 });
 
 describe('groupon_clear_cart', () => {
-  it('DRY RUN: lists what would be removed and deletes nothing', async () => {
+  it('PHASE 1: lists what would be removed with a confirmToken and deletes nothing', async () => {
     const cart = { items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] };
     const { webClient, readClient, deleteCartItem } = makeClients({ getCart: vi.fn().mockResolvedValue(cart) });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_clear_cart', {});
+    const data = await phaseOne(h, 'groupon_clear_cart', {});
 
     expect(deleteCartItem).not.toHaveBeenCalled();
-    const data = parseToolResult<Record<string, unknown>>(res);
-    expect(data.preview).toBe(true);
-    expect(data.itemCount).toBe(2);
-    expect(data.optionIds).toEqual(['opt-a', 'opt-b']);
+    expect(data.action).toBe('groupon.clear_cart');
+    const preview = data.preview as Json;
+    expect(preview.itemCount).toBe(2);
+    expect(preview.optionIds).toEqual(['opt-a', 'opt-b']);
+    expect(String(preview.note)).toMatch(/removed/i);
     await h.close();
   });
 
-  it('CONFIRM: deletes each line item, re-reads, and verifies empty', async () => {
+  it('PHASE 2: the returned confirmToken removes each line exactly once', async () => {
     const getCart = vi
       .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] }) // phase 1 preview
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] }) // phase 2 fresh read
+      .mockResolvedValueOnce({ items: [] }); // verify
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const { confirmToken } = await phaseOne(h, 'groupon_clear_cart', {});
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    const res = await h.callTool('groupon_clear_cart', { confirmToken });
+
+    expect(deleteCartItem).toHaveBeenCalledTimes(1);
+    expect(parseToolResult<Json>(res)).toMatchObject({ cleared: true, verified: true, removed: 1 });
+    await h.close();
+  });
+
+  it('refuses with DRAFT_CHANGED when the cart changed between phases', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-new' }] });
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const { confirmToken } = await phaseOne(h, 'groupon_clear_cart', {});
+    const res = await h.callTool('groupon_clear_cart', { confirmToken });
+
+    expect(parseToolResult<Json>(res).error).toBe('DRAFT_CHANGED');
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('CONFIRMED: deletes each line item, re-reads, and verifies empty', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] }) // phase 1 preview
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
       .mockResolvedValueOnce({ items: [] });
     const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_clear_cart', { confirm: true });
+    const res = await confirmed(h, 'groupon_clear_cart');
 
     expect(deleteCartItem.mock.calls.map((c) => c[0])).toEqual([{ optionId: 'opt-a' }, { optionId: 'opt-b' }]);
-    expect(getCart).toHaveBeenCalledTimes(2); // list + verify
+    expect(getCart).toHaveBeenCalledTimes(3); // preview + fresh list + verify
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data).toMatchObject({ cleared: true, verified: true, removed: 2 });
     await h.close();
   });
 
-  it('CONFIRM: reports verified=false + remaining when a re-read still shows items', async () => {
-    const getCart = vi
-      .fn()
-      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] })
-      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] });
+  it('CONFIRMED: reports verified=false + remaining when a re-read still shows items', async () => {
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }] });
     const { webClient, readClient } = makeClients({ getCart });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_clear_cart', { confirm: true });
+    const res = await confirmed(h, 'groupon_clear_cart');
 
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data).toMatchObject({ cleared: true, verified: false, removed: 1, remaining: ['opt-a'] });
     await h.close();
   });
 
-  it('CONFIRM: a delete failing partway reports which lines were already removed', async () => {
+  it('CONFIRMED: a delete failing partway reports which lines were already removed', async () => {
     const { McpToolError } = await import('@chrischall/mcp-utils');
     const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }, { optionId: 'opt-c' }] });
     const deleteCartItem = vi
@@ -463,7 +643,7 @@ describe('groupon_clear_cart', () => {
     const { webClient, readClient } = makeClients({ getCart, deleteCartItem });
     const h = await harness(webClient, readClient);
 
-    const res = await h.callTool('groupon_clear_cart', { confirm: true });
+    const res = await confirmed(h, 'groupon_clear_cart');
 
     expect(res.isError).toBe(true);
     expect(deleteCartItem).toHaveBeenCalledTimes(2); // stops at the failure
@@ -476,7 +656,7 @@ describe('groupon_clear_cart', () => {
     await h.close();
   });
 
-  it('short-circuits an already-empty cart with no confirm and no deletes', async () => {
+  it('short-circuits an already-empty cart with no confirmation and no deletes', async () => {
     const { webClient, readClient, deleteCartItem } = makeClients({ getCart: vi.fn().mockResolvedValue({ items: [] }) });
     const h = await harness(webClient, readClient);
 
