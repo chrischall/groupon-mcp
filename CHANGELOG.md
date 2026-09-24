@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/chrischall/groupon-mcp/compare/v1.1.0...v1.1.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv in the production-majors group ([#113](https://github.com/chrischall/groupon-mcp/issues/113)) ([a60f046](https://github.com/chrischall/groupon-mcp/commit/a60f046c1d66fcf2d6d9b1b044c955b04e63a5aa))
+
 ## [1.1.0](https://github.com/chrischall/groupon-mcp/compare/v1.0.2...v1.1.0) (2026-09-24)
 
 
