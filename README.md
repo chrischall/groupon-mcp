@@ -31,7 +31,9 @@ Add the server to your `.mcp.json`:
 
 Reading deals needs no account. The cart tools (`groupon_view_cart`, `groupon_purchase`, `groupon_clear_cart`) use your signed-in groupon.com session, which the server picks up from your browser through the **ContextMint Bridge** extension:
 
-1. Install ContextMint Bridge from its [releases page](https://github.com/nullnet-app/contextmint-bridge/releases). Chrome: download the Chrome zip, unzip it, and load it unpacked at `chrome://extensions` (Developer mode). Safari: it ships inside the ContextMint app.
+1. Install ContextMint Bridge from its [releases page](https://github.com/nullnet-app/contextmint-bridge/releases). Chrome: download the Chrome zip, unzip it, and load it unpacked at `chrome://extensions` (Developer mode). Safari isn't available yet (it will ship inside the ContextMint app, which has no public download), so use Chrome for now.
+
+   ContextMint Bridge is the fetchproxy browser extension under its new name, from the same maintainer; fetchproxy's own README (https://github.com/chrischall/fetchproxy#extension) points to it. Its source is public at https://github.com/nullnet-app/contextmint-bridge: build it yourself, or check a release zip against the `.sha256` file published beside it (`shasum -a 256 -c contextmint-bridge-chrome-<version>.zip.sha256`).
 2. Sign in at [groupon.com](https://www.groupon.com) in that browser. The first cart call lifts the session cookie; approve the request in the extension when asked.
 
 For local dev without the extension, set `GROUPON_SESSION_COOKIE` (see `.env.example`); set `GROUPON_DISABLE_FETCHPROXY=1` to turn the browser path off.
