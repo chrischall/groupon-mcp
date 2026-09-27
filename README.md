@@ -27,6 +27,15 @@ Add the server to your `.mcp.json`:
 }
 ```
 
+### Cart sign-in (optional)
+
+Reading deals needs no account. The cart tools (`groupon_view_cart`, `groupon_purchase`, `groupon_clear_cart`) use your signed-in groupon.com session, which the server picks up from your browser through the **ContextMint Bridge** extension:
+
+1. Install ContextMint Bridge from its [releases page](https://github.com/nullnet-app/contextmint-bridge/releases). Chrome: download the Chrome zip, unzip it, and load it unpacked at `chrome://extensions` (Developer mode). Safari: it ships inside the ContextMint app.
+2. Sign in at [groupon.com](https://www.groupon.com) in that browser. The first cart call lifts the session cookie; approve the request in the extension when asked.
+
+For local dev without the extension, set `GROUPON_SESSION_COOKIE` (see `.env.example`); set `GROUPON_DISABLE_FETCHPROXY=1` to turn the browser path off.
+
 ## Confirmations
 
 The cart writes (`groupon_purchase`, `groupon_clear_cart`) ask you to confirm before they change anything. A client that can show a confirmation prompt (Claude Code) shows one. Elsewhere, the first call changes nothing and returns a preview plus a `confirmToken`, and only a repeat call with that token proceeds. The token is tied to exactly what was previewed: if the deal's price, the chosen option or quantity, or the cart's contents change between the two calls, the write is refused and a fresh preview is returned. `groupon_purchase` still only fills the cart; you complete payment yourself at the checkout URL.

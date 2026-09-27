@@ -34,7 +34,7 @@ export class SessionExpiredError extends McpToolError {
   constructor() {
     super('Your Groupon session is missing or expired — cart operations require a signed-in session.', {
       hint:
-        'Open or refresh a signed-in groupon.com tab in the browser running the fetchproxy/Transporter extension, then re-pair the bridge and retry. ' +
+        'Open or refresh a signed-in groupon.com tab in the browser running the ContextMint Bridge extension, then re-pair the bridge and retry. ' +
         'Alternatively set GROUPON_SESSION_COOKIE to a fresh session cookie for local dev.',
     });
   }

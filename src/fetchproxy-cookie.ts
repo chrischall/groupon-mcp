@@ -12,7 +12,7 @@
 //      readEnvVar semantics inside the resolver).
 //   2. fetchproxy fallback — unless GROUPON_DISABLE_FETCHPROXY is truthy, lift
 //      the logged-in groupon.com session out of the signed-in browser tab (via
-//      the Transporter extension) and use the captured `Cookie` header —
+//      the ContextMint Bridge extension) and use the captured `Cookie` header —
 //      fetchproxy is NOT in the hot path afterward.
 //   3. Error — nothing configured: an actionable message naming
 //      GROUPON_SESSION_COOKIE and the browser sign-in fallback.
@@ -51,7 +51,7 @@ const bootstrapWithDeadline: BootstrapFn = async (opts) => {
   const outcome = await withDeadline((bootstrap as unknown as BootstrapFn)(opts), BOOTSTRAP_TIMEOUT_MS);
   if (outcome.timedOut) {
     throw new Error(
-      'fetchproxy: timed out waiting for the browser bridge. Is the Transporter extension running and signed into groupon.com in that browser?',
+      'fetchproxy: timed out waiting for the browser bridge. Is the ContextMint Bridge extension running, and are you signed into groupon.com in that browser?',
     );
   }
   return outcome.value;

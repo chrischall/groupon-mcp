@@ -141,6 +141,12 @@ describe('GrouponWebClient', () => {
     expect(err.hint).toMatch(/this item/i);
   });
 
+  it('SessionExpiredError names ContextMint Bridge in its remediation hint', () => {
+    const err = new SessionExpiredError();
+    expect(err.hint).toMatch(/ContextMint Bridge/);
+    expect(err.hint).not.toMatch(/Transporter/);
+  });
+
   it('throws SessionExpiredError on a 401', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonRes(401, { error: 'unauthorized' }));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
