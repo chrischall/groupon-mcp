@@ -80,5 +80,7 @@ describe('resolveSessionCookie', () => {
     const assertion = expect(p).rejects.toThrow(/timed out waiting for the browser bridge/);
     await vi.advanceTimersByTimeAsync(15_000);
     await assertion;
+    await expect(p).rejects.toThrow(/ContextMint Bridge/);
+    await expect(p).rejects.not.toThrow(/Transporter/);
   });
 });
