@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.2](https://github.com/chrischall/groupon-mcp/compare/v1.1.1...v1.1.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv in the production-dependencies group ([#115](https://github.com/chrischall/groupon-mcp/issues/115)) ([d08062e](https://github.com/chrischall/groupon-mcp/commit/d08062e52bc1897cb12f4de888efe3ad14ab30c0))
+* **deps:** move to [@fetchproxy](https://github.com/fetchproxy) 3.4 for ContextMint Bridge errors, capability subsets and managed pins ([#117](https://github.com/chrischall/groupon-mcp/issues/117)) ([616c642](https://github.com/chrischall/groupon-mcp/commit/616c642b2409e4853ed43cc5bdfd96ecdc4139e0))
+* **deps:** move to @chrischall/mcp-utils 2.8 and [@fetchproxy](https://github.com/fetchproxy) 3.4.1 for clearer browser-bridge errors ([#118](https://github.com/chrischall/groupon-mcp/issues/118)) ([afa4559](https://github.com/chrischall/groupon-mcp/commit/afa4559960cf2ce0077226567d4a8be84f370c90))
+
 ## [1.1.1](https://github.com/chrischall/groupon-mcp/compare/v1.1.0...v1.1.1) (2026-09-24)
 
 
