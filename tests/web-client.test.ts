@@ -38,7 +38,8 @@ describe('GrouponWebClient', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('https://www.groupon.com/mobilenextapi/graphql');
     expect(init.method).toBe('POST');
-    expect(init.headers['content-type']).toBe('application/json');
+    // Exactly one content-type (a duplicate lowercase key would be comma-joined by fetch).
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
     expect(init.headers['apollographql-client-name']).toBe('mobilenextapi');
     expect(init.headers['x-operation-name']).toBe('GetCart');
     // The session cookie authorizes the cart op — and NO CSRF / fraud header.
@@ -221,13 +222,101 @@ describe('GrouponWebClient', () => {
   });
 
   it('maps a request timeout to an actionable McpToolError, not a raw TimeoutError', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError')),
+            );
+          }),
+      );
+      const client = makeClient(fetchImpl as unknown as typeof fetch);
+      const pending = client.getCart().catch((e) => e);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await pending;
+      expect(err).toBeInstanceOf(McpToolError);
+      expect(String(err.message)).toBe('Groupon cart request timed out after 30s.');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('honours Retry-After with fake timers on GetCart (sleeps 2s, then replays)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(jsonRes(429, {}, { 'retry-after': '2' }))
+        .mockResolvedValueOnce(cartRes());
+      const client = new GrouponWebClient({ fetchImpl: fetchImpl as unknown as typeof fetch, cookie: 'c=1' });
+      const pending = client.getCart();
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toEqual({ items: [], __typename: 'Cart' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a 503 still failing after the GetCart retry as a rate limit', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(503, {}));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.getCart()).rejects.toThrow('Groupon cart rate limit: still receiving 503 after a retry.');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  // fleet-audit #483: a 503 from a gateway can arrive AFTER the upstream applied
+  // the mutation, so replaying createOrUpdateCartItem could double an add.
+  it('does NOT replay a cart mutation on 503 — it may already have been applied', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(503, {}));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client
+      .addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'u', quantity: 1, isGift: false })
+      .catch((e) => e);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toMatch(/503/);
+    expect(String(err.message)).toMatch(/not retried/i);
+    expect(err.hint).toMatch(/groupon_view_cart/);
+  });
+
+  it('does NOT replay deleteCartItem on 503 either', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(503, {}));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(client.deleteCartItem({ optionId: 'o' })).rejects.toThrow(/not retried/i);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('still retries a cart mutation once on 429 (guaranteed not processed)', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(429, {}, { 'retry-after': '1' }))
+      .mockResolvedValueOnce(jsonRes(200, [{ data: { deleteCartItem: { success: true } } }]));
+    const sleeps: number[] = [];
+    const client = new GrouponWebClient({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      cookie: 'c=1',
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
     });
+    await expect(client.deleteCartItem({ optionId: 'o' })).resolves.toEqual({ deleteCartItem: { success: true } });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleeps).toEqual([1000]);
+  });
+
+  it('surfaces a non-transient HTTP error with the persisted-hash hint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('Bad Request', { status: 400 }));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
     const err = await client.getCart().catch((e) => e);
     expect(err).toBeInstanceOf(McpToolError);
-    expect(String(err.message)).toMatch(/timed out/i);
+    expect(String(err.message)).toBe('Groupon cart error 400 for POST /mobilenextapi/graphql: Bad Request');
+    expect(err.hint).toMatch(/persisted-query hash/);
   });
 });
 

@@ -34,7 +34,7 @@ describe('GrouponClient', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('https://www.groupon.com/mobilenextapi/graphql');
     expect(init.method).toBe('POST');
-    expect(init.headers['content-type']).toBe('application/json');
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
     expect(init.headers['apollographql-client-name']).toBe('mobilenextapi');
 
     const batch = JSON.parse(init.body);
@@ -89,9 +89,12 @@ describe('GrouponClient', () => {
   it('surfaces the body on non-2xx HTTP errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response('Bad Request', { status: 400 }));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    await expect(client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 })).rejects.toThrow(
-      /Groupon GraphQL/i,
-    );
+    const err = await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 }).catch((e) => e);
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(String(err.message)).toBe('Groupon GraphQL error 400 for POST /mobilenextapi/graphql: Bad Request');
+    expect(err.hint).toMatch(/persisted-query hash/);
+    // A 400 is not a transient status — no retry.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('retries once on 429, honoring Retry-After', async () => {
@@ -124,13 +127,86 @@ describe('GrouponClient', () => {
   });
 
   it('maps a request timeout to an actionable McpToolError, not a raw TimeoutError', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-    });
+    vi.useFakeTimers();
+    try {
+      // A fetch that never answers until its signal aborts — only the 30s
+      // per-attempt timeout can end it.
+      const fetchImpl = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError')),
+            );
+          }),
+      );
+      const client = makeClient(fetchImpl as unknown as typeof fetch);
+      const pending = client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 }).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await pending;
+      expect(err).toBeInstanceOf(McpToolError);
+      expect(String(err.message)).toBe('Groupon GraphQL request timed out after 30s.');
+      // A timeout is not retried.
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds a body that stalls after the headers with the same timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => {
+        const body = new ReadableStream<Uint8Array>({ start() {} }); // never enqueues or closes
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
+      const client = makeClient(fetchImpl as unknown as typeof fetch);
+      const pending = client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 }).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const err = await pending;
+      expect(err).toBeInstanceOf(McpToolError);
+      expect(String(err.message)).toMatch(/timed out after 30s/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('honours Retry-After in real time with fake timers (sleeps 3s, then replays)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(jsonRes(429, {}, { 'Retry-After': '3' }))
+        .mockResolvedValueOnce(feedRes());
+      // No injected sleep: the default timer-based sleep runs under fake timers.
+      const client = new GrouponClient({ fetchImpl: fetchImpl as unknown as typeof fetch, now: () => 1_000_000 });
+      const pending = client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 });
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toMatchObject({ cards: expect.any(Array) });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to a 1s delay when Retry-After is missing', async () => {
+    const sleep = vi.fn(async () => {});
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonRes(503, {})).mockResolvedValueOnce(feedRes());
+    const client = makeClient(fetchImpl as unknown as typeof fetch, { sleep });
+    await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 });
+    expect(sleep).toHaveBeenCalledWith(1000);
+  });
+
+  it('surfaces a 429 still failing after the retry as a rate limit', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(429, {}));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    const err = await client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 }).catch((e) => e);
-    expect(err).toBeInstanceOf(McpToolError);
-    expect(String(err.message)).toMatch(/timed out/i);
+    await expect(client.browseDealFeed({ division: 'new-york', limit: 10, offset: 0 })).rejects.toThrow(
+      'Groupon GraphQL rate limit: still receiving 429 after a retry.',
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces a rate limit still failing after the retry', async () => {
@@ -190,7 +266,7 @@ describe('GrouponClient.getDeal', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('https://www.groupon.com/mobilenextapi/graphql');
     expect(init.method).toBe('POST');
-    expect(init.headers['content-type']).toBe('application/json');
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
     expect(init.headers['apollographql-client-name']).toBe('mobilenextapi');
 
     const batch = JSON.parse(init.body);
