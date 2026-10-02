@@ -1,6 +1,7 @@
 import {
   createApiClient,
   ApiError,
+  EdgeBlockedError,
   RequestTimeoutError,
   McpToolError,
   type ApiClient,
@@ -100,10 +101,16 @@ export interface MapErrorOptions {
 /**
  * Translate a transport failure into the actionable {@link McpToolError}s the
  * Groupon tools have always surfaced. Errors that are already actionable
- * (McpToolError, SessionExpiredError, …) pass through untouched.
+ * (McpToolError, SessionExpiredError, EdgeBlockedError, …) pass through
+ * untouched.
  */
 export function mapTransportError(err: unknown, opts: MapErrorOptions): unknown {
   if (err instanceof McpToolError) return err;
+  // A CDN/WAF refusal page (chrischall/mcp-host#1015) passes through as itself:
+  // its message already says the request never reached Groupon, and rewriting
+  // it here would attach the persisted-hash hint (or, at 429/503, a rate-limit
+  // one) to a block that neither re-capturing a hash nor waiting will fix.
+  if (err instanceof EdgeBlockedError) return err;
   if (err instanceof RequestTimeoutError) {
     return new McpToolError(`${opts.service} request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`, {
       hint: 'Groupon was slow to respond. Retry shortly.',

@@ -37,7 +37,7 @@
   "tools": [
     {
       "name": "groupon_healthcheck",
-      "description": "Report that the groupon-mcp server is running and its version"
+      "description": "Make one live request to Groupon and report whether deal reads work, with a failure kind (edge_blocked, http, timeout, transport, stale_persisted_query)"
     }
   ],
   "compatibility": {

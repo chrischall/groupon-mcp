@@ -21,7 +21,7 @@ await runMcp({
   banner:
     '[groupon-mcp] This project was developed and is maintained by AI. Use at your own discretion.',
   tools: [
-    registerHealthcheckTools,
+    (server) => registerHealthcheckTools(server, client),
     (server) => registerDealTools(server, client),
     (server) => registerDetailTools(server, client),
     (server) => registerCartTools(server, webClient, client),
