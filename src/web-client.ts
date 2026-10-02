@@ -1,4 +1,4 @@
-import { readEnvVar, ApiError, McpToolError } from '@chrischall/mcp-utils';
+import { readEnvVar, ApiError, EdgeBlockedError, McpToolError } from '@chrischall/mcp-utils';
 import {
   buildGetCart,
   buildCreateOrUpdateCartItem,
@@ -278,11 +278,15 @@ export class GrouponWebClient {
 
 /**
  * A 401 (the transport's `onUnauthorized`) or a 403 — Groupon's two ways of
- * refusing a dead session cookie. An edge/WAF 403 is an `ApiError` with status
- * 403 too and is deliberately treated the same as before: re-lift once, then
- * report the session as expired.
+ * refusing a dead session cookie. A CDN/WAF refusal page is NOT one: the
+ * shared client throws it as an `EdgeBlockedError`, which passes through as
+ * itself without a re-lift.
  */
 function isAuthFailure(err: unknown): boolean {
+  // A CDN/WAF refusal page (chrischall/mcp-host#1015) answers 401/403 too, but
+  // the session was never judged: re-lifting would spend the browser's cookie
+  // for nothing, and reporting it as expired sends the user to sign in again.
+  if (err instanceof EdgeBlockedError) return false;
   return err instanceof GrouponAuthRejected || (err instanceof ApiError && (err.status === 401 || err.status === 403));
 }
 

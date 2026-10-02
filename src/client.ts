@@ -85,7 +85,21 @@ export interface GrouponClientOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Groupon redeployed its schema and a persisted-query hash in graphql-ops.ts
+ * no longer resolves. Its own class (still an {@link McpToolError}) so the
+ * healthcheck can name it rather than reporting an unexplained failure.
+ */
+export class StalePersistedQueryError extends McpToolError {
+  constructor(message: string, hint: string) {
+    super(message, { hint });
+    this.name = 'StalePersistedQueryError';
+  }
+}
+
 export class GrouponClient {
+  /** The GraphQL endpoint this client posts to (after any GROUPON_GRAPHQL_URL override). */
+  readonly endpoint: string;
   private readonly configError: Error | null;
   private readonly transport: GrouponTransport;
   private readonly cache: ResponseCache;
@@ -102,6 +116,7 @@ export class GrouponClient {
     const cacheTtlMs = opts.cacheTtlMs ?? readTtlMsEnv('GROUPON_CACHE_TTL', DEFAULT_CACHE_TTL_MS);
     this.cache = createResponseCache({ ttlMs: { dynamic: cacheTtlMs }, now });
     const endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
+    this.endpoint = endpoint;
     // Reads are unauthenticated: no config error to defer.
     this.configError = null;
     this.transport = createGrouponTransport({
@@ -181,6 +196,19 @@ export class GrouponClient {
   }
 
   /**
+   * One live round-trip for `groupon_healthcheck`: the cheapest persisted op
+   * (the category taxonomy), never served from the response cache, and with
+   * the transport's errors left RAW — a status-carrying `ApiError`, an
+   * `EdgeBlockedError`, a `RequestTimeoutError` — so the shared healthcheck
+   * ladder can classify them. Only a stale hash is translated, into
+   * {@link StalePersistedQueryError}.
+   */
+  async probe(): Promise<void> {
+    const parsed = await this.transport.api.fetchJson('POST', this.transport.path, { body: [buildMainNavigation()] });
+    this.assertNoPersistedQueryError(parsed);
+  }
+
+  /**
    * POST a batched array of persisted-query ops to the GraphQL endpoint via the
    * shared mcp-utils client: a fresh 30s timeout per attempt (body read
    * included), one Retry-After-honouring retry on 429/503. Detects a stale
@@ -215,11 +243,9 @@ export class GrouponClient {
     for (const el of elements) {
       const errors = (el as { errors?: Array<{ message?: string }> } | null)?.errors;
       if (Array.isArray(errors) && errors.some((e) => e?.message === 'PersistedQueryNotFound')) {
-        throw new McpToolError(
+        throw new StalePersistedQueryError(
           'Groupon persisted query is stale; the sha256Hash in graphql-ops.ts must be re-captured.',
-          {
-            hint: 'Groupon redeployed its GraphQL schema. Re-capture the BrowseDealFeed persisted-query hash from a live groupon.com search (the request body\'s extensions.persistedQuery.sha256Hash) and update BROWSE_DEAL_FEED_HASH in src/graphql-ops.ts.',
-          },
+          'Groupon redeployed its GraphQL schema. Re-capture the BrowseDealFeed persisted-query hash from a live groupon.com search (the request body\'s extensions.persistedQuery.sha256Hash) and update BROWSE_DEAL_FEED_HASH in src/graphql-ops.ts.',
         );
       }
     }
