@@ -13,13 +13,15 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // ends at "added to cart" and returns the ready-to-pay checkout URL for the USER
 // to complete payment. This tool NEVER attempts to place an order.
 //
-// Both writes are gated by mcp-utils' requireConfirmationWithFallback: a client
+// Both writes are gated by mcp-utils' confirmWrite kit: a client
 // that can show an elicitation prompt asks the user; one that cannot (claude.ai,
 // Claude Desktop) gets the two-phase token flow — the first call does NOTHING and
 // returns a preview plus a confirmToken, and only a repeat call with that token
-// proceeds (MCP_CONFIRM_MODE governs it; see README). The token is bound to the
-// exact payload, rebuilt from a FRESH read on every call, so a deal repriced or a
-// cart changed between the two calls is refused as DRAFT_CHANGED.
+// proceeds (MCP_CONFIRM_MODE governs it; see README). The token AND an
+// elicitation acceptance are bound to the exact mutation payload plus the
+// preview as shown (price included), rebuilt from a FRESH read on every call,
+// so a deal repriced or a cart changed between the two calls is refused as
+// DRAFT_CHANGED.
 // groupon_purchase still issues the anonymous getDeal READ on the preview call
 // (needed to resolve/preview the option), but never the cart mutation.
 //
@@ -30,13 +32,13 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // are read independently so a future divergence is handled correctly.
 import { z } from "zod";
 import {
+  CONFIRM_FLOW_SENTENCE,
   McpToolError,
   NonEmptyString,
   PositiveInt,
   confirmTokenParam,
-  confirmationFromEnv,
+  confirmWrite,
   minifiedResult,
-  requireConfirmationWithFallback,
   toolAnnotations,
 } from "@chrischall/mcp-utils";
 import type { GrouponClient, GetDeal } from "../client.js";
@@ -47,10 +49,6 @@ import { stripDealId } from "./detail.js";
  *  user completes payment here themselves. */
 const CHECKOUT_URL = "https://www.groupon.com/checkout/cart";
 
-/** Appended to each gated tool's description. */
-const CONFIRM_FLOW =
-  "Asks the user to confirm first: a confirmation prompt where the client supports one; otherwise the first call " +
-  "returns a preview and a confirmToken, and only a repeat call with that token proceeds (see MCP_CONFIRM_MODE).";
 
 /**
  * Collect every distinct `optionId` value anywhere in a cart payload, walking
@@ -323,7 +321,7 @@ export function registerCartTools(
         "Add a Groupon deal option to your cart, ready for checkout. Once confirmed it adds the item, re-reads " +
         "the cart to verify the line quantity, and returns the checkout URL for YOU to complete payment. It CANNOT place the order — " +
         "Groupon checkout is native Apple/Google Pay, card, or PayPal. " +
-        CONFIRM_FLOW,
+        CONFIRM_FLOW_SENTENCE,
       annotations: toolAnnotations({
         title: "Add a Groupon deal to your cart",
         readOnly: false,
@@ -370,43 +368,34 @@ export function registerCartTools(
         ...(resolved.discount ? { discount: resolved.discount } : {}),
         note: "Once confirmed, this is added to your Groupon cart; you then complete payment yourself at the checkout URL.",
       };
-      const gate = await requireConfirmationWithFallback(
-        ctx,
-        confirmationFromEnv({
-          action: "groupon.purchase",
-          message: "Review and confirm adding this deal to your Groupon cart:",
-          details: preview,
-          tool: "groupon_purchase",
-          confirmToken,
-          subject: () => ({
-            target: slug,
-            // Exactly what addToCart sends, plus the price read now: a deal
-            // repriced between the two calls is refused as DRAFT_CHANGED.
-            payload: {
-              optionId: resolved.optionId,
-              dealUuid: resolved.dealUuid,
-              optionUuid: resolved.optionUuid,
-              quantity,
-              isGift,
-              price: resolved.price,
-            },
-            preview,
-          }),
-        }),
-      );
+      // Exactly what addToCart sends. The price read now is bound through the
+      // preview, so a deal repriced between the two calls is DRAFT_CHANGED.
+      const cartItem = {
+        optionId: resolved.optionId,
+        dealUuid: resolved.dealUuid,
+        optionUuid: resolved.optionUuid,
+        quantity,
+        isGift,
+      };
+      const gate = await confirmWrite(ctx, {
+        tool: "groupon_purchase",
+        action: "groupon.purchase",
+        summary: `Add ${quantity} × "${resolved.optionTitle}" (${resolved.dealTitle}) to your Groupon cart`,
+        message: "Review and confirm adding this deal to your Groupon cart:",
+        // One signed-in session per server; there is no account to choose.
+        account: undefined,
+        target: slug,
+        payload: cartItem,
+        preview,
+        confirmToken,
+      });
       if (gate) return gate;
 
       // Snapshot the cart first, so verification can tell a real change from
       // an option that was already there. A rejected add throws (see
       // GrouponWebClient.addToCart) rather than returning.
       const before = await webClient.getCart();
-      await webClient.addToCart({
-        optionId: resolved.optionId,
-        dealUuid: resolved.dealUuid,
-        optionUuid: resolved.optionUuid,
-        quantity,
-        isGift,
-      });
+      await webClient.addToCart(cartItem);
       // Re-read the cart to confirm the item actually landed — an accepted
       // mutation is not proof it persisted.
       const after = await webClient.getCart();
@@ -448,7 +437,7 @@ export function registerCartTools(
       description:
         "Remove ALL items from your signed-in Groupon cart. Once confirmed it removes every line item and re-reads " +
         "the cart to verify it is empty. " +
-        CONFIRM_FLOW,
+        CONFIRM_FLOW_SENTENCE,
       annotations: toolAnnotations({
         title: "Clear your Groupon cart",
         readOnly: false,
@@ -474,19 +463,19 @@ export function registerCartTools(
         optionIds,
         note: "Once confirmed, every line item above is removed from your cart.",
       };
-      const gate = await requireConfirmationWithFallback(
-        ctx,
-        confirmationFromEnv({
-          action: "groupon.clear_cart",
-          message: "Review and confirm removing every item from your Groupon cart:",
-          details: preview,
-          tool: "groupon_clear_cart",
-          confirmToken,
-          // The cart is re-read on every call (above), so a line added or
-          // removed between the two calls is refused as DRAFT_CHANGED.
-          subject: () => ({ target: "", payload: { optionIds }, preview }),
-        }),
-      );
+      const gate = await confirmWrite(ctx, {
+        tool: "groupon_clear_cart",
+        action: "groupon.clear_cart",
+        summary: `Remove all ${optionIds.length} line items from your Groupon cart`,
+        message: "Review and confirm removing every item from your Groupon cart:",
+        account: undefined,
+        // The cart is re-read on every call (above), so a line added or
+        // removed between the two calls is refused as DRAFT_CHANGED.
+        target: "",
+        payload: { optionIds },
+        preview,
+        confirmToken,
+      });
       if (gate) return gate;
 
       const removedIds: string[] = [];

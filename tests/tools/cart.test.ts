@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
 import type { ElicitResult } from '@modelcontextprotocol/server';
+import { CONFIRM_FLOW_SENTENCE } from '@chrischall/mcp-utils';
 import { registerCartTools, resolveCartItem, collectCartOptionIds } from '../../src/tools/cart.js';
 import type { GrouponClient, GetDeal } from '../../src/client.js';
 import type { GrouponWebClient } from '../../src/web-client.js';
@@ -217,6 +218,43 @@ describe('groupon_purchase', () => {
       discount: '-38%',
     });
     expect(String(preview.note)).toMatch(/checkout URL/i);
+    await h.close();
+  });
+
+  it('PHASE 1 previews exactly the cart mutation it will send (willSend), via the shared confirmWrite kit', async () => {
+    const { webClient, readClient } = makeClients();
+    const h = await harness(webClient, readClient);
+    const data = await phaseOne(h, 'groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a', quantity: 2 });
+    const preview = data.preview as Json;
+    expect(preview.willSend).toEqual({
+      optionId: 'opt-a',
+      dealUuid: 'deal-uuid-1',
+      optionUuid: (resolveCartItem(deal, 'opt-a') as Json).optionUuid,
+      quantity: 2,
+      isGift: false,
+    });
+    expect(String(preview.action)).toMatch(/Versailles Massage Bar/);
+    await h.close();
+  });
+
+  it('describes its confirm flow with the shared CONFIRM_FLOW_SENTENCE', async () => {
+    const { webClient, readClient } = makeClients();
+    const h = await harness(webClient, readClient);
+    const tools = await h.listTools();
+    for (const name of ['groupon_purchase', 'groupon_clear_cart']) {
+      const t = tools.find((x) => x.name === name)!;
+      expect(t.description).toContain(CONFIRM_FLOW_SENTENCE);
+    }
+    await h.close();
+  });
+
+  it('refuses a purchase token replayed against a different deal', async () => {
+    const { webClient, readClient, addToCart } = makeClients();
+    const h = await harness(webClient, readClient);
+    const { confirmToken } = await phaseOne(h, 'groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
+    const res = await h.callTool('groupon_purchase', { dealId: 'some-other-deal', optionId: 'opt-a', confirmToken });
+    expect(res.isError).toBe(true);
+    expect(addToCart).not.toHaveBeenCalled();
     await h.close();
   });
 
