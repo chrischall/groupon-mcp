@@ -1,9 +1,4 @@
-import {
-  readEnvVar,
-  parseRetryAfterMs,
-  formatApiError,
-  McpToolError,
-} from '@chrischall/mcp-utils';
+import { readEnvVar, ApiError, McpToolError } from '@chrischall/mcp-utils';
 import {
   buildGetCart,
   buildCreateOrUpdateCartItem,
@@ -12,7 +7,12 @@ import {
   type DeleteCartItemArgs,
   type PersistedQueryOp,
 } from './graphql-ops.js';
-import { fetchWithTimeout } from './fetch-timeout.js';
+import {
+  createGrouponTransport,
+  mapTransportError,
+  GrouponAuthRejected,
+  type GrouponTransport,
+} from './transport.js';
 
 // Groupon's consumer GraphQL endpoint — the SAME host the anonymous reads use,
 // but the cart ops require the user's authenticated SESSION COOKIE. Verified
@@ -21,8 +21,15 @@ import { fetchWithTimeout } from './fetch-timeout.js';
 // apollographql-client-name + x-operation-name.
 const DEFAULT_ENDPOINT = 'https://www.groupon.com/mobilenextapi/graphql';
 const SERVICE = 'Groupon cart';
-const CLIENT_NAME = 'mobilenextapi';
-const MAX_RETRY_AFTER_MS = 30_000;
+const RATE_LIMIT_HINT = 'Space out cart operations and retry shortly.';
+const HTTP_HINT =
+  'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.';
+// GetCart is a read: retry throttling (429) and transient unavailability (503).
+const READ_RETRY_STATUSES = [429, 503];
+// Cart MUTATIONS retry only 429, which is guaranteed not processed. A 503 from
+// a gateway can arrive after Groupon already applied the change, so replaying
+// createOrUpdateCartItem could double an add (fleet-audit #483).
+const MUTATION_RETRY_STATUSES = [429];
 
 /**
  * The Groupon session is missing or expired. Distinct from a generic upstream
@@ -95,17 +102,20 @@ export class GrouponWebClient {
    * behalf would burn a bridge round-trip to produce the same dead value.
    */
   private cookieSource: 'env' | 'lift' | null;
-  private readonly endpoint: string;
-  private readonly fetchImpl: typeof fetch;
-  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly readTransport: GrouponTransport;
+  private readonly mutationTransport: GrouponTransport;
   private readonly resolveCookie: () => Promise<{ cookieHeader: string }>;
 
   constructor(opts: GrouponWebClientOptions = {}) {
     this.cookie = opts.cookie ?? readEnvVar('GROUPON_SESSION_COOKIE') ?? null;
     this.cookieSource = this.cookie ? 'env' : null;
-    this.endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
-    this.fetchImpl = opts.fetchImpl ?? fetch;
-    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    const endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
+    const fetchImpl = opts.fetchImpl ?? fetch;
+    const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const transport = (retryStatuses: number[]) =>
+      createGrouponTransport({ endpoint, service: SERVICE, fetchImpl, sleep, retryStatuses, rateLimitHint: RATE_LIMIT_HINT });
+    this.readTransport = transport(READ_RETRY_STATUSES);
+    this.mutationTransport = transport(MUTATION_RETRY_STATUSES);
     this.resolveCookie =
       opts.resolveCookie ??
       (async () => {
@@ -156,7 +166,7 @@ export class GrouponWebClient {
   /** Read the signed-in user's cart. Throws {@link SessionExpiredError} when the
    *  session is logged out (a null `getCart` payload or a 401/403). */
   async getCart(): Promise<Cart> {
-    const batch = await this.request<GetCartResponse[]>(buildGetCart(), 'GetCart');
+    const batch = await this.request<GetCartResponse[]>(buildGetCart(), 'GetCart', 'read');
     const cart = batch?.[0]?.data?.getCart;
     // A logged-out session comes back with a null/absent getCart rather than an
     // empty-but-present cart object — treat that as an expired session.
@@ -170,6 +180,7 @@ export class GrouponWebClient {
     const batch = await this.request<CartMutationResponse[]>(
       buildCreateOrUpdateCartItem(args),
       'createOrUpdateCartItem',
+      'mutation',
     );
     return mutationData(batch, 'add to cart');
   }
@@ -177,104 +188,67 @@ export class GrouponWebClient {
   /** Remove a line item from the user's cart by its optionId. Returns the
    *  mutation payload. Callers should RE-READ getCart to verify. */
   async deleteCartItem(args: DeleteCartItemArgs): Promise<Cart> {
-    const batch = await this.request<CartMutationResponse[]>(buildDeleteCartItem(args), 'deleteCartItem');
+    const batch = await this.request<CartMutationResponse[]>(
+      buildDeleteCartItem(args),
+      'deleteCartItem',
+      'mutation',
+    );
     return mutationData(batch, 'remove from cart');
   }
 
   /**
    * POST a single-op batched persisted-query array to the GraphQL endpoint with
-   * the session cookie + minimal headers. Retries once on 429/503 honoring
-   * Retry-After, maps 401/403 to {@link SessionExpiredError}, detects a stale
-   * persisted hash, and refuses to blind-parse a non-JSON 2xx body.
+   * the session cookie + minimal headers, via the shared mcp-utils client: a
+   * fresh 30s timeout per attempt and one Retry-After-honouring retry (429/503
+   * for the GetCart read, 429 only for a mutation). Maps 401/403 to
+   * {@link SessionExpiredError} after at most one browser re-lift, detects a
+   * stale persisted hash, and refuses to blind-parse a non-JSON 2xx body.
    */
-  private async request<T>(op: PersistedQueryOp, operationName: string): Promise<T> {
-    // Each attempt gets a FRESH timeout signal (fetchWithTimeout creates it),
-    // so the Retry-After retry never inherits a clock that ran down while we
-    // slept. Only the cookie is carried between attempts.
-    const send = (cookie: string): Promise<Response> =>
-      fetchWithTimeout(
-        this.fetchImpl,
-        this.endpoint,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'apollographql-client-name': CLIENT_NAME,
-            'x-operation-name': operationName,
-            Cookie: cookie,
-          },
-          body: JSON.stringify([op]),
-        },
-        SERVICE,
-      );
-
-    let cookie = await this.requireCookie();
-    let res = await send(cookie);
-
-    // A logged-out / expired session. When the cookie came from the browser it
-    // is worth exactly one re-lift per request: the tab usually still holds a
-    // live session, and the copy we cached is only stale because we cached it.
-    // Env cookies are static, so they fail fast instead.
-    //
-    // Shared by BOTH 401 checks — the initial response and the post-Retry-After
-    // one. Handling only the first meant an expiry that happened to surface
-    // after a 429 bypassed the re-lift and wedged the client exactly as before.
-    let relifted = false;
-    const settleAuthFailure = async (): Promise<Response> => {
-      if (relifted || !this.invalidateLiftedCookie()) throw new SessionExpiredError();
-      relifted = true;
-      cookie = await this.requireCookie();
-      const replayed = await send(cookie);
-      if (replayed.status === 401 || replayed.status === 403) {
-        // The re-lifted cookie is dead too — the user is signed out in the
-        // browser. Drop it on the way out so the NEXT call re-reads the tab
-        // instead of inheriting a value we already know is dead; otherwise
-        // "sign back in and retry" would still be a lie.
-        this.invalidateLiftedCookie();
-        throw new SessionExpiredError();
-      }
-      return replayed;
-    };
-
-    if (res.status === 401 || res.status === 403) {
-      res = await settleAuthFailure();
-    }
-    // Honor Retry-After once on throttling / transient unavailability.
-    if (res.status === 429 || res.status === 503) {
-      const delayMs = parseRetryAfterMs(res.headers.get('retry-after'), {
-        defaultMs: 1000,
-        capMs: MAX_RETRY_AFTER_MS,
+  private async request<T>(op: PersistedQueryOp, operationName: string, kind: 'read' | 'mutation'): Promise<T> {
+    const transport = kind === 'read' ? this.readTransport : this.mutationTransport;
+    const send = (cookie: string): Promise<unknown> =>
+      transport.api.fetchJson('POST', transport.path, {
+        body: [op],
+        headers: { 'x-operation-name': operationName, Cookie: cookie },
       });
-      await this.sleep(delayMs);
-      res = await send(cookie);
-      if (res.status === 401 || res.status === 403) {
-        res = await settleAuthFailure();
-      }
-    }
 
-    const text = await res.text();
-    if (res.status === 429 || res.status === 503) {
-      throw new McpToolError(`${SERVICE} rate limit: still receiving ${res.status} after a retry.`, {
-        hint: 'Space out cart operations and retry shortly.',
-      });
-    }
-    if (!res.ok) {
-      throw new McpToolError(formatApiError(res.status, 'POST', this.endpoint, text, { service: SERVICE }), {
-        hint: 'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.',
-      });
-    }
-
-    // A 2xx that isn't JSON is a bot/challenge interstitial — never JSON.parse blind.
     let parsed: unknown;
     try {
-      parsed = text.trim() ? JSON.parse(text) : undefined;
-    } catch {
-      throw new McpToolError(
-        `${SERVICE} returned a non-JSON ${res.status} response (likely a bot/challenge interstitial).`,
-        {
-          hint: 'Groupon may be rate-limiting or challenging this client. Retry shortly; if it persists, the request may need to originate from a different network.',
-        },
-      );
+      try {
+        parsed = await send(await this.requireCookie());
+      } catch (err) {
+        if (!isAuthFailure(err)) throw err;
+        // A logged-out / expired session. When the cookie came from the
+        // browser it is worth exactly one re-lift per request: the tab usually
+        // still holds a live session, and the copy we cached is only stale
+        // because we cached it. Env cookies are static, so they fail fast.
+        //
+        // The shared client retries a 429 internally, so a 401 that surfaces
+        // AFTER a Retry-After lands here too — one re-lift covers both.
+        if (!this.invalidateLiftedCookie()) throw new SessionExpiredError();
+        try {
+          parsed = await send(await this.requireCookie());
+        } catch (replayErr) {
+          if (!isAuthFailure(replayErr)) throw replayErr;
+          // The re-lifted cookie is dead too — the user is signed out in the
+          // browser. Drop it on the way out so the NEXT call re-reads the tab
+          // instead of inheriting a value we already know is dead.
+          this.invalidateLiftedCookie();
+          throw new SessionExpiredError();
+        }
+      }
+    } catch (err) {
+      throw mapTransportError(err, {
+        service: SERVICE,
+        retryStatuses: transport === this.readTransport ? READ_RETRY_STATUSES : MUTATION_RETRY_STATUSES,
+        rateLimitHint: RATE_LIMIT_HINT,
+        httpHint: HTTP_HINT,
+        unretried503: () =>
+          new McpToolError(
+            `${SERVICE} was unavailable (503) for ${operationName}; the request was not retried because Groupon may already have applied it.`,
+            { hint: 'Check groupon_view_cart to see whether the change landed before retrying.' },
+          ),
+      });
     }
 
     this.assertNoPersistedQueryError(parsed);
@@ -300,6 +274,16 @@ export class GrouponWebClient {
       }
     }
   }
+}
+
+/**
+ * A 401 (the transport's `onUnauthorized`) or a 403 — Groupon's two ways of
+ * refusing a dead session cookie. An edge/WAF 403 is an `ApiError` with status
+ * 403 too and is deliberately treated the same as before: re-lift once, then
+ * report the session as expired.
+ */
+function isAuthFailure(err: unknown): boolean {
+  return err instanceof GrouponAuthRejected || (err instanceof ApiError && (err.status === 401 || err.status === 403));
 }
 
 /** Shape of one batched-response element for a GetCart op. */

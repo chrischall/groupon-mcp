@@ -5,8 +5,6 @@ import {
   readEnvVar,
   readTtlMsEnv,
   createResponseCache,
-  parseRetryAfterMs,
-  formatApiError,
   McpToolError,
   type ResponseCache,
 } from '@chrischall/mcp-utils';
@@ -17,7 +15,7 @@ import {
   type BrowseDealFeedArgs,
   type GetDealArgs,
 } from './graphql-ops.js';
-import { fetchWithTimeout } from './fetch-timeout.js';
+import { createGrouponTransport, mapTransportError, type GrouponTransport } from './transport.js';
 
 // Load .env for local dev; silently skip if dotenv is unavailable (e.g. the
 // .mcpb bundle). loadDotenvSafely never lets .env override a host-provided value.
@@ -39,15 +37,16 @@ try {
 // below are all it wants.
 const DEFAULT_ENDPOINT = 'https://www.groupon.com/mobilenextapi/graphql';
 const SERVICE = 'Groupon GraphQL';
-// Groupon's web client identifies itself with this Apollo client-name header;
-// the endpoint expects it alongside a JSON content type.
-const CLIENT_NAME = 'mobilenextapi';
 // Deal listings change slowly relative to a single agent session; a short-TTL
 // response cache absorbs an agent re-issuing the same browse/search. Override
 // with GROUPON_CACHE_TTL (seconds; 0 = off).
 const DEFAULT_CACHE_TTL_MS = 60_000;
-// Honor Retry-After on 429/503, but never sleep absurdly long inside a tool call.
-const MAX_RETRY_AFTER_MS = 30_000;
+// Reads are idempotent, so both throttling (429) and transient unavailability
+// (503) are retried once, honoring Retry-After.
+const READ_RETRY_STATUSES = [429, 503];
+const RATE_LIMIT_HINT = 'Space out calls, or rely on the built-in response cache (GROUPON_CACHE_TTL).';
+const HTTP_HINT =
+  'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.';
 
 /** Response shape we read out of a `BrowseDealFeed` op. Loosely typed — the
  *  tools that project deal cards own the field-level validation. */
@@ -87,10 +86,8 @@ export interface GrouponClientOptions {
 }
 
 export class GrouponClient {
-  private readonly endpoint: string;
   private readonly configError: Error | null;
-  private readonly fetchImpl: typeof fetch;
-  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly transport: GrouponTransport;
   private readonly cache: ResponseCache;
 
   /**
@@ -102,13 +99,19 @@ export class GrouponClient {
    */
   constructor(opts: GrouponClientOptions = {}) {
     const now = opts.now ?? Date.now;
-    this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     const cacheTtlMs = opts.cacheTtlMs ?? readTtlMsEnv('GROUPON_CACHE_TTL', DEFAULT_CACHE_TTL_MS);
     this.cache = createResponseCache({ ttlMs: { dynamic: cacheTtlMs }, now });
-    this.endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
+    const endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
     // Reads are unauthenticated: no config error to defer.
     this.configError = null;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.transport = createGrouponTransport({
+      endpoint,
+      service: SERVICE,
+      fetchImpl: opts.fetchImpl ?? fetch,
+      sleep: opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
+      retryStatuses: READ_RETRY_STATUSES,
+      rateLimitHint: RATE_LIMIT_HINT,
+    });
   }
 
   /** Gate kept for the future write path; a no-op for the read-only MVP. */
@@ -178,60 +181,25 @@ export class GrouponClient {
   }
 
   /**
-   * POST a batched array of persisted-query ops to the GraphQL endpoint. Retries
-   * once on 429/503 honoring Retry-After, detects a stale persisted hash, and
-   * refuses to blind-parse a non-JSON 2xx body (a bot/challenge interstitial).
+   * POST a batched array of persisted-query ops to the GraphQL endpoint via the
+   * shared mcp-utils client: a fresh 30s timeout per attempt (body read
+   * included), one Retry-After-honouring retry on 429/503. Detects a stale
+   * persisted hash, and refuses to blind-parse a non-JSON 2xx body (a
+   * bot/challenge interstitial).
    */
   private async request<T>(batch: unknown[]): Promise<T> {
     this.requireReadable();
-    const method = 'POST';
-    // A FRESH init per attempt: the timeout clock starts when the signal is
-    // created, so reusing one across the Retry-After sleep (up to 30s) would
-    // abort the retry before it was even sent.
-    const send = (): Promise<Response> =>
-      fetchWithTimeout(this.fetchImpl, this.endpoint, {
-        method,
-        headers: {
-          'content-type': 'application/json',
-          'apollographql-client-name': CLIENT_NAME,
-        },
-        body: JSON.stringify(batch),
-      }, SERVICE);
-
-    let res = await send();
-    // Groupon signals throttling / transient unavailability with 429 / 503.
-    // Honor Retry-After once, capped so a tool call never sleeps unreasonably long.
-    if (res.status === 429 || res.status === 503) {
-      const delayMs = parseRetryAfterMs(res.headers.get('retry-after'), {
-        defaultMs: 1000,
-        capMs: MAX_RETRY_AFTER_MS,
-      });
-      await this.sleep(delayMs);
-      res = await send();
-    }
-
-    const text = await res.text();
-    if (res.status === 429 || res.status === 503) {
-      throw new McpToolError(`${SERVICE} rate limit: still receiving ${res.status} after a retry.`, {
-        hint: 'Space out calls, or rely on the built-in response cache (GROUPON_CACHE_TTL).',
-      });
-    }
-    if (!res.ok) {
-      throw new McpToolError(formatApiError(res.status, method, this.endpoint, text, { service: SERVICE }), {
-        hint: 'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.',
-      });
-    }
-
-    // A 2xx that isn't JSON is a bot/challenge interstitial — never JSON.parse blind.
     let parsed: unknown;
     try {
-      parsed = text.trim() ? JSON.parse(text) : undefined;
-    } catch {
-      throw new McpToolError(`${SERVICE} returned a non-JSON ${res.status} response (likely a bot/challenge interstitial).`, {
-        hint: 'Groupon may be rate-limiting or challenging this client. Retry shortly; if it persists, the request may need to originate from a different network.',
+      parsed = await this.transport.api.fetchJson('POST', this.transport.path, { body: batch });
+    } catch (err) {
+      throw mapTransportError(err, {
+        service: SERVICE,
+        retryStatuses: READ_RETRY_STATUSES,
+        rateLimitHint: RATE_LIMIT_HINT,
+        httpHint: HTTP_HINT,
       });
     }
-
     this.assertNoPersistedQueryError(parsed);
     return parsed as T;
   }
