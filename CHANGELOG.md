@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.3](https://github.com/chrischall/groupon-mcp/compare/v1.1.2...v1.1.3) (2026-10-03)
+
+
+### Bug Fixes
+
+* **deps:** adopt @chrischall/mcp-utils 2.12.0 createApiClient for the Groupon clients ([#124](https://github.com/chrischall/groupon-mcp/issues/124)) ([d908bc2](https://github.com/chrischall/groupon-mcp/commit/d908bc2f6cac5956c35b07a5e4173cf4c374002c))
+* **deps:** bump @chrischall/mcp-utils to 2.10.0 ([#122](https://github.com/chrischall/groupon-mcp/issues/122)) ([fdb32a0](https://github.com/chrischall/groupon-mcp/commit/fdb32a01bde9ce0876bfce16f57a8f3bd52737fb))
+* **deps:** bump @chrischall/mcp-utils to 2.13.0 ([#127](https://github.com/chrischall/groupon-mcp/issues/127)) ([2c40bc6](https://github.com/chrischall/groupon-mcp/commit/2c40bc6b008a4cca5ce41623be7e86f748432f7b))
+* keep write approvals valid across a hosted restart (mcp-utils 2.11.0) ([#123](https://github.com/chrischall/groupon-mcp/issues/123)) ([8343dde](https://github.com/chrischall/groupon-mcp/commit/8343dde450c9d1a51dd9be44df58224b282ab0ce))
+* report CDN/WAF blocks as edge_blocked, not a rejected credential (mcp-utils 2.9.0) ([#119](https://github.com/chrischall/groupon-mcp/issues/119)) ([364d1a2](https://github.com/chrischall/groupon-mcp/commit/364d1a2dbc082a9145c4d7d5213ce119915fc8d9))
+* report Groupon CDN blocks as edge_blocked and make the healthcheck a live probe ([#125](https://github.com/chrischall/groupon-mcp/issues/125)) ([7009993](https://github.com/chrischall/groupon-mcp/commit/7009993d1027b3a20fb231dc55dc41a83f5239a0))
+
 ## [1.1.2](https://github.com/chrischall/groupon-mcp/compare/v1.1.1...v1.1.2) (2026-09-27)
 
 
