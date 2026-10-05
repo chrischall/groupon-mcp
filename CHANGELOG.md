@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.4](https://github.com/chrischall/groupon-mcp/compare/v1.1.3...v1.1.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 3 updates ([#130](https://github.com/chrischall/groupon-mcp/issues/130)) ([d5acb50](https://github.com/chrischall/groupon-mcp/commit/d5acb50cbaf363bf5ef4045d64d7b0a45c48d12f))
+* **deps:** require @chrischall/mcp-utils 2.14.0 and MCP SDK 2.3.0 ([#132](https://github.com/chrischall/groupon-mcp/issues/132)) ([975f84b](https://github.com/chrischall/groupon-mcp/commit/975f84b5445b240d913246250653171700563c54))
+
 ## [1.1.3](https://github.com/chrischall/groupon-mcp/compare/v1.1.2...v1.1.3) (2026-10-03)
 
 
