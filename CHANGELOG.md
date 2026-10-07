@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.5](https://github.com/chrischall/groupon-mcp/compare/v1.1.4...v1.1.5) (2026-10-07)
+
+
+### Bug Fixes
+
+* **deps:** pick up mcp-utils 2.15.0 elicitation opt-out and fetchproxy 3.6.0 room-frame fix ([#133](https://github.com/chrischall/groupon-mcp/issues/133)) ([6cb9391](https://github.com/chrischall/groupon-mcp/commit/6cb939163a6a63dfef3665b6ff9399688fff0278))
+
+
+### Documentation
+
+* document MCP_CONFIRM_ELICITATION ([#135](https://github.com/chrischall/groupon-mcp/issues/135)) ([16cec20](https://github.com/chrischall/groupon-mcp/commit/16cec2053755bee6754f5dcd7fa58cf89375ce2d))
+
 ## [1.1.4](https://github.com/chrischall/groupon-mcp/compare/v1.1.3...v1.1.4) (2026-10-05)
 
 
