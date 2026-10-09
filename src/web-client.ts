@@ -105,11 +105,15 @@ export class GrouponWebClient {
   private readonly readTransport: GrouponTransport;
   private readonly mutationTransport: GrouponTransport;
   private readonly resolveCookie: () => Promise<{ cookieHeader: string }>;
+  /** Set when the endpoint is not a groupon.com https URL: every cart call
+   *  throws it, so the session cookie is never lifted or sent elsewhere. */
+  private readonly endpointError: McpToolError | null;
 
   constructor(opts: GrouponWebClientOptions = {}) {
     this.cookie = opts.cookie ?? readEnvVar('GROUPON_SESSION_COOKIE') ?? null;
     this.cookieSource = this.cookie ? 'env' : null;
     const endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
+    this.endpointError = cookieEndpointError(endpoint);
     const fetchImpl = opts.fetchImpl ?? fetch;
     const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const transport = (retryStatuses: number[]) =>
@@ -205,6 +209,7 @@ export class GrouponWebClient {
    * stale persisted hash, and refuses to blind-parse a non-JSON 2xx body.
    */
   private async request<T>(op: PersistedQueryOp, operationName: string, kind: 'read' | 'mutation'): Promise<T> {
+    if (this.endpointError) throw this.endpointError;
     const transport = kind === 'read' ? this.readTransport : this.mutationTransport;
     const send = (cookie: string): Promise<unknown> =>
       transport.api.fetchJson('POST', transport.path, {
@@ -274,6 +279,27 @@ export class GrouponWebClient {
       }
     }
   }
+}
+
+/**
+ * The cart client sends the user's full groupon.com session cookie, so it only
+ * talks to groupon.com (or a subdomain) over https. A `GROUPON_GRAPHQL_URL`
+ * pointing anywhere else — a typo, a stale local override, a poisoned .env —
+ * would hand that session to another host (fleet-audit #489). Returns the
+ * error to raise on every cart call, or null for a safe endpoint.
+ */
+function cookieEndpointError(endpoint: string): McpToolError | null {
+  const url = URL.canParse(endpoint) ? new URL(endpoint) : undefined;
+  const host = url?.hostname.toLowerCase();
+  if (url?.protocol === 'https:' && host && (host === 'groupon.com' || host.endsWith('.groupon.com'))) {
+    return null;
+  }
+  return new McpToolError(
+    `The Groupon cart endpoint "${endpoint}" (GROUPON_GRAPHQL_URL) is not a groupon.com https URL, so the cart tools will not send your session cookie to it.`,
+    {
+      hint: 'Unset GROUPON_GRAPHQL_URL (or point it at an https://*.groupon.com URL) and restart the server.',
+    },
+  );
 }
 
 /**
