@@ -4,7 +4,7 @@
   "name": "groupon-mcp",
   "display_name": "Groupon",
   "version": "1.1.5",
-  "description": "Groupon deals for Claude — search and browse local, goods, and travel deals via natural language",
+  "description": "Groupon deals for Claude — search and browse local, goods, and travel deals, and add deals to your signed-in cart with confirmation",
   "author": {
     "name": "Chris Chall",
     "email": "chris.c.hall@gmail.com",
@@ -31,13 +31,49 @@
       "command": "node",
       "args": [
         "${__dirname}/dist/bundle.js"
-      ]
+      ],
+      "env": {
+        "GROUPON_SESSION_COOKIE": "${user_config.groupon_session_cookie}"
+      }
+    }
+  },
+  "user_config": {
+    "groupon_session_cookie": {
+      "type": "string",
+      "title": "Groupon session cookie (optional)",
+      "description": "Optional, and only for the cart tools. Leave blank to have the ContextMint Bridge browser extension pick up your signed-in groupon.com session. To set it here, paste the full Cookie request header from a signed-in www.groupon.com request. It authorizes changes to your Groupon cart, so treat it like a password.",
+      "required": false,
+      "sensitive": true
     }
   },
   "tools": [
     {
       "name": "groupon_healthcheck",
       "description": "Make one live request to Groupon and report whether deal reads work, with a failure kind (edge_blocked, http, timeout, transport, stale_persisted_query)"
+    },
+    {
+      "name": "groupon_search_deals",
+      "description": "Search or browse Groupon deals for a city (no sign-in needed)"
+    },
+    {
+      "name": "groupon_get_deal",
+      "description": "Get one Groupon deal's detail, including each option's id and price (no sign-in needed)"
+    },
+    {
+      "name": "groupon_list_categories",
+      "description": "List Groupon's category taxonomy (no sign-in needed)"
+    },
+    {
+      "name": "groupon_view_cart",
+      "description": "View the items in your signed-in Groupon cart"
+    },
+    {
+      "name": "groupon_purchase",
+      "description": "Add a deal option to your signed-in Groupon cart after you confirm, and return the checkout URL; you complete payment yourself"
+    },
+    {
+      "name": "groupon_clear_cart",
+      "description": "Remove every item from your signed-in Groupon cart after you confirm"
     }
   ],
   "compatibility": {

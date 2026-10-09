@@ -1,8 +1,9 @@
 # groupon-mcp
 
-MCP server for [Groupon](https://www.groupon.com). Reads Groupon's public consumer GraphQL endpoint and exposes deal search/browse tools to Claude over stdio. Read-only: no API key, no account, no cookies.
+MCP server for [Groupon](https://www.groupon.com), over stdio. Two surfaces:
 
-**Status: read-path MVP.** This phase establishes the Groupon identity and a minimal, compiling stdio skeleton (`runMcp` with an empty tool set). The deal-read client and tools land in later phases. Purchase / cookie-session / hosted-credential paths are intentionally out of scope and were stripped from the scaffold — they return later.
+- **Deal reads** (anonymous): search/browse, deal detail, category taxonomy and a live healthcheck, against Groupon's public consumer GraphQL endpoint. No API key, no account, no cookies.
+- **Cart writes** (signed-in): view the cart, add a deal option (`groupon_purchase`), clear the cart. These act on the user's real Groupon account through its **session cookie**, either lifted from a signed-in groupon.com tab by the ContextMint Bridge (fetchproxy) or set as `GROUPON_SESSION_COOKIE`. Both writes are confirmation-gated by mcp-utils' `confirmWrite`. Checkout is hand-off only: there is no place-order API, so `groupon_purchase` ends at "added to cart" and returns the checkout URL.
 
 ## Commands
 
@@ -20,19 +21,26 @@ node dist/index.js
 
 ## Tool naming
 
-All tools are prefixed `groupon_` (e.g. `groupon_search_deals`). None are registered yet in this phase.
+All tools are prefixed `groupon_`: `groupon_healthcheck`, `groupon_search_deals`, `groupon_get_deal`, `groupon_list_categories` (reads), and `groupon_view_cart`, `groupon_purchase`, `groupon_clear_cart` (cart). Keep `manifest.json`'s `tools` list in step; `tests/server-boot.test.ts` fails when it drifts.
 
 ## Architecture
 
 ```
 src/
-  version.ts   # single source of truth for VERSION (x-release-please-version)
-  index.ts     # MCP server entry — runMcp({ name, version, banner, tools: [] })
+  version.ts            # single source of truth for VERSION (x-release-please-version)
+  index.ts              # MCP server entry — runMcp wires every register*Tools
+  client.ts             # GrouponClient: anonymous reads (BrowseDealFeed, getDeal, GetMainNavigation)
+  web-client.ts         # GrouponWebClient: cookie-carrying cart ops (GetCart, createOrUpdateCartItem, deleteCartItem)
+  fetchproxy-cookie.ts  # lifts the session Cookie from the browser (lazy-imported)
+  transport.ts          # shared createApiClient transport + error mapping
+  graphql-ops.ts        # persisted-query op builders + hashes
+  view.ts               # the `view` (compact/full) parameter
+  tools/                # healthcheck, deals, detail, cart
 ```
 
-Each future tool file exports a `register<Domain>Tools(server, deps)` function that calls `server.registerTool(name, { description, annotations, inputSchema }, handler)` (high-level `McpServer` API with zod schemas) and returns results via `textResult(...)`. `index.ts` wires them through `runMcp` from `@chrischall/mcp-utils`.
+Each tool file exports a `register<Domain>Tools(server, deps)` function that calls `server.registerTool(name, { description, annotations, inputSchema }, handler)` (high-level `McpServer` API with zod schemas) and returns results via `textResult(...)`. `index.ts` wires them through `runMcp` from `@chrischall/mcp-utils`.
 
-## Groupon read endpoint (for the next phases)
+## Groupon read endpoint
 
 Groupon deal reads use a consumer GraphQL endpoint reachable from a plain server-side fetch with **no cookies, no auth, no bot wall**:
 
@@ -63,7 +71,7 @@ Response: `data.browseDealFeed = { cards, facets, pagination, browseProps: { bre
 
 ## Environment
 
-No environment variables are required for the read path — the consumer endpoint is public.
+No environment variables are required for the read path — the consumer endpoint is public. The cart path uses `GROUPON_SESSION_COOKIE` (optional; else the browser bridge, which `GROUPON_DISABLE_FETCHPROXY=1` turns off). `GROUPON_GRAPHQL_URL` overrides the endpoint, but the cart client refuses any override that is not `https://*.groupon.com`, so the cookie never leaves Groupon. See `.env.example`.
 
 Local dev still loads `.env` via `dotenv` (guarded import; the mcpb bundle omits `dotenv` and the host provides env). `readEnvVar` treats blank, `"undefined"`, `"null"`, and unsubstituted `${FOO}` placeholders as unset.
 
@@ -71,7 +79,7 @@ Local dev still loads `.env` via `dotenv` (guarded import; the mcpb bundle omits
 
 Tests live in `tests/` (vitest). `tests/server-boot.test.ts` spawns the real built artifacts (`dist/bundle.js` with no `node_modules`, and `dist/index.js`) and asserts the `initialize` + `tools/list` handshake. `tests/version-sync.test.ts` guards the version markers.
 
-**Vitest gotcha (tool error-path tests, for later phases):** when a `beforeEach(mockClear)` is in play, an *eager* `mockRejectedValue(...)` loses vitest's settled-result tracking and the rejection is mis-reported as unhandled. Reject *lazily* instead: `mock.mockImplementationOnce(() => Promise.reject(new Error(...)))`.
+**Vitest gotcha (tool error-path tests):** when a `beforeEach(mockClear)` is in play, an *eager* `mockRejectedValue(...)` loses vitest's settled-result tracking and the rejection is mis-reported as unhandled. Reject *lazily* instead: `mock.mockImplementationOnce(() => Promise.reject(new Error(...)))`.
 
 ## Versioning
 
