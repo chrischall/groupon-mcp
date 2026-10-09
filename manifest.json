@@ -3,7 +3,7 @@
   "manifest_version": "0.3",
   "name": "groupon-mcp",
   "display_name": "Groupon",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Groupon deals for Claude — search and browse local, goods, and travel deals, and add deals to your signed-in cart with confirmation",
   "author": {
     "name": "Chris Chall",
