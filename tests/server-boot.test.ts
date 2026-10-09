@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, copyFileSync, rmSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -121,5 +121,23 @@ describe('server boot (built artifacts)', () => {
     expect(names).toContain('groupon_view_cart');
     expect(names).toContain('groupon_purchase');
     expect(names).toContain('groupon_clear_cart');
+  }, 30_000);
+
+  it('manifest.json lists every registered tool and wires the optional session cookie (fleet-audit #487)', async () => {
+    // The .mcpb manifest is what an installer shows; it listed only the
+    // healthcheck, hiding that the server can change the signed-in cart.
+    const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8')) as {
+      tools: Array<{ name: string; description: string }>;
+      user_config?: Record<string, { sensitive?: boolean; required?: boolean }>;
+      server: { mcp_config: { env?: Record<string, string> } };
+    };
+    const listed = (await listToolsViaStdio(BIN, ROOT)).map((tool) => tool.name).sort();
+    expect(manifest.tools.map((tool) => tool.name).sort()).toEqual(listed);
+    for (const tool of manifest.tools) expect(tool.description, tool.name).not.toBe('');
+
+    const env = manifest.server.mcp_config.env ?? {};
+    const ref = /^\$\{user_config\.(\w+)\}$/.exec(env.GROUPON_SESSION_COOKIE ?? '')?.[1];
+    expect(ref, 'GROUPON_SESSION_COOKIE maps to a user_config key').toBeDefined();
+    expect(manifest.user_config?.[ref!]).toMatchObject({ sensitive: true, required: false });
   }, 30_000);
 });

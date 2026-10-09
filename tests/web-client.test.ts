@@ -56,6 +56,43 @@ describe('GrouponWebClient', () => {
     expect(cart).toEqual({ items: [], __typename: 'Cart' });
   });
 
+  describe('session cookie only goes to Groupon (fleet-audit #489)', () => {
+    afterEach(() => {
+      delete process.env.GROUPON_GRAPHQL_URL;
+    });
+
+    it.each([
+      'https://evil.example/graphql',
+      'https://www.groupon.com.evil.example/mobilenextapi/graphql',
+      'http://www.groupon.com/mobilenextapi/graphql',
+    ])('refuses to send the cookie to GROUPON_GRAPHQL_URL=%s', async (url) => {
+      process.env.GROUPON_GRAPHQL_URL = url;
+      const fetchImpl = vi.fn().mockResolvedValue(cartRes());
+      const resolveCookie = vi.fn();
+      const client = new GrouponWebClient({ fetchImpl: fetchImpl as unknown as typeof fetch, resolveCookie, sleep: async () => {} });
+
+      await expect(client.getCart()).rejects.toThrow(/GROUPON_GRAPHQL_URL/);
+      await expect(client.addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'ou', quantity: 1, isGift: false })).rejects.toBeInstanceOf(McpToolError);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      // Not even lifted from the browser: there is nowhere safe to send it.
+      expect(resolveCookie).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'https://www.groupon.com/mobilenextapi/graphql',
+      'https://staging.groupon.com/mobilenextapi/graphql/',
+      'https://groupon.com/graphql',
+    ])('allows a groupon.com https override: %s', async (url) => {
+      process.env.GROUPON_GRAPHQL_URL = url;
+      const fetchImpl = vi.fn().mockResolvedValue(cartRes());
+      const client = makeClient(fetchImpl as unknown as typeof fetch);
+
+      await client.getCart();
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(String(fetchImpl.mock.calls[0][0])).toBe(url.replace(/\/+$/, ''));
+    });
+  });
+
   it('getCart reads the env cookie without touching the bridge', async () => {
     process.env.GROUPON_SESSION_COOKIE = 'envcookie=1';
     const fetchImpl = vi.fn().mockResolvedValue(cartRes());

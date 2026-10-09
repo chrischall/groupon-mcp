@@ -22,8 +22,9 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // preview as shown (price included), rebuilt from a FRESH read on every call,
 // so a deal repriced or a cart changed between the two calls is refused as
 // DRAFT_CHANGED.
-// groupon_purchase still issues the anonymous getDeal READ on the preview call
-// (needed to resolve/preview the option), but never the cart mutation.
+// groupon_purchase still issues the anonymous getDeal READ and a cart READ on
+// the preview call (needed to resolve/preview the option and show any existing
+// line), but never the cart mutation.
 //
 // resolveCartItem maps a getDeal read → the ids createOrUpdateCartItem needs.
 // Verified against a live getDeal (2026-07-25): deal.uuid is the dealUuid, and
@@ -48,6 +49,10 @@ import { stripDealId } from "./detail.js";
 /** The user-facing, ready-to-pay checkout URL. There is no place-order API; the
  *  user completes payment here themselves. */
 const CHECKOUT_URL = "https://www.groupon.com/checkout/cart";
+
+/** Upper bound on one add, so a runaway quantity fails validation here rather
+ *  than relying on Groupon to reject it. */
+const MAX_QUANTITY = 10;
 
 
 /**
@@ -170,6 +175,32 @@ function verifyAdd(
   return {
     verified: qtyAfter === quantity || qtyAfter === qtyBefore + quantity,
     quantityInCart: qtyAfter,
+  };
+}
+
+/**
+ * What the cart already holds for `optionId`, for the purchase preview: the
+ * line quantity when readable, a marker when the line is there but its quantity
+ * is not, else 0 — plus, for an existing line, a warning naming both possible
+ * results of the add.
+ */
+function cartLineState(
+  cart: unknown,
+  optionId: string,
+): { display: number | string; warning?: (quantity: number) => string } {
+  if (!cartContainsOptionId(cart, optionId)) return { display: 0 };
+  const qty = cartLineQuantity(cart, optionId);
+  if (qty === undefined) {
+    return {
+      display: "yes (quantity not readable)",
+      warning: () =>
+        "This option is already in your cart. Groupon may set the line to the quantity above or add to it, so check the cart (groupon_view_cart) if the final quantity matters.",
+    };
+  }
+  return {
+    display: qty,
+    warning: (quantity) =>
+      `Your cart already has ${qty} of this option. Groupon may set the line to ${quantity} or add to it (${qty + quantity}); if it sets it, the line ends at ${quantity}.`,
   };
 }
 
@@ -337,9 +368,9 @@ export function registerCartTools(
           .describe(
             "Which deal option to buy (an option id from groupon_get_deal). Required when the deal has more than one option; may be omitted for a single-option deal.",
           ),
-        quantity: PositiveInt.default(1).describe(
-          "How many to add (default 1).",
-        ),
+        quantity: PositiveInt.max(MAX_QUANTITY)
+          .default(1)
+          .describe(`How many to add (1-${MAX_QUANTITY}, default 1).`),
         isGift: z
           .boolean()
           .default(false)
@@ -354,6 +385,15 @@ export function registerCartTools(
       // the gate below passes.
       const deal = await readClient.getDeal({ dealId: slug });
       const resolved = resolveCartItem(deal, optionId);
+      // Read the cart BEFORE the gate too (fleet-audit #1016). Whether
+      // createOrUpdateCartItem sets the line to `quantity` or adds to it is not
+      // documented, so an option already in the cart could end up LOWER than it
+      // was. The preview names the existing line and both outcomes, and since
+      // the preview is bound into the token, a cart line that changes between
+      // the two calls is refused as DRAFT_CHANGED. This same read is the
+      // "before" snapshot for verification after the add.
+      const before = await webClient.getCart();
+      const existing = cartLineState(before, resolved.optionId);
 
       const preview = {
         deal: resolved.dealTitle,
@@ -366,6 +406,8 @@ export function registerCartTools(
           ? { strikeThroughPrice: resolved.strikeThroughPrice }
           : {}),
         ...(resolved.discount ? { discount: resolved.discount } : {}),
+        alreadyInCart: existing.display,
+        ...(existing.warning ? { cartWarning: existing.warning(quantity) } : {}),
         note: "Once confirmed, this is added to your Groupon cart; you then complete payment yourself at the checkout URL.",
       };
       // Exactly what addToCart sends. The price read now is bound through the
@@ -391,10 +433,9 @@ export function registerCartTools(
       });
       if (gate) return gate;
 
-      // Snapshot the cart first, so verification can tell a real change from
-      // an option that was already there. A rejected add throws (see
-      // GrouponWebClient.addToCart) rather than returning.
-      const before = await webClient.getCart();
+      // `before` (read above, and bound through the preview) lets verification
+      // tell a real change from an option that was already there. A rejected
+      // add throws (see GrouponWebClient.addToCart) rather than returning.
       await webClient.addToCart(cartItem);
       // Re-read the cart to confirm the item actually landed — an accepted
       // mutation is not proof it persisted.

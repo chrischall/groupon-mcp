@@ -192,3 +192,26 @@ describe('groupon_list_categories', () => {
     await h.close();
   });
 });
+
+describe('read-tool annotations (fleet-audit #488)', () => {
+  it('marks every read tool read-only AND open-world, like the cart tools', async () => {
+    const { registerDealTools } = await import('../../src/tools/deals.js');
+    // The harness's listTools() exposes only name + description, so capture the
+    // registration config directly.
+    const annotations = new Map<string, Record<string, unknown>>();
+    const server = {
+      registerTool: (name: string, config: { annotations?: Record<string, unknown> }) => {
+        annotations.set(name, config.annotations ?? {});
+      },
+    } as unknown as Parameters<typeof registerDetailTools>[0];
+    registerDealTools(server, client);
+    registerDetailTools(server, client);
+    for (const name of ['groupon_search_deals', 'groupon_get_deal', 'groupon_list_categories']) {
+      expect(annotations.get(name), name).toMatchObject({
+        readOnlyHint: true,
+        openWorldHint: true,
+      });
+      expect(typeof annotations.get(name)?.title, name).toBe('string');
+    }
+  });
+});

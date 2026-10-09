@@ -201,9 +201,10 @@ describe('groupon_purchase', () => {
 
     // getDeal (a READ) runs to resolve the option; the URL is stripped to a slug.
     expect(getDeal.mock.calls[0][0]).toEqual({ dealId: 'versailles-massage-bar-1' });
-    // NO mutation on the preview path.
+    // NO mutation on the preview path — only a cart READ, so the preview can
+    // show what is already there.
     expect(addToCart).not.toHaveBeenCalled();
-    expect(getCart).not.toHaveBeenCalled();
+    expect(getCart).toHaveBeenCalledTimes(1);
 
     expect(data.action).toBe('groupon.purchase');
     const preview = data.preview as Json;
@@ -216,8 +217,58 @@ describe('groupon_purchase', () => {
       price: { amount: 3700, currencyCode: 'USD' },
       strikeThroughPrice: { amount: 6000, currencyCode: 'USD' },
       discount: '-38%',
+      alreadyInCart: 0,
     });
     expect(String(preview.note)).toMatch(/checkout URL/i);
+    await h.close();
+  });
+
+  it('PHASE 1 shows the quantity already in the cart and what the line could become (fleet-audit #1016)', async () => {
+    // createOrUpdateCartItem may SET the line (3 -> 1) rather than add to it
+    // (3 -> 4). Approving "add 1" without seeing the existing 3 could silently
+    // lower the line, so the preview must name both outcomes.
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a', quantity: 3 }] });
+    const { webClient, readClient, addToCart } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const data = await phaseOne(h, 'groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
+
+    const preview = data.preview as Json;
+    expect(preview.alreadyInCart).toBe(3);
+    expect(String(preview.cartWarning)).toMatch(/already has 3/);
+    expect(String(preview.cartWarning)).toMatch(/\b1\b/);
+    expect(String(preview.cartWarning)).toMatch(/\b4\b/);
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('PHASE 1 flags an existing line whose quantity cannot be read', async () => {
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }] });
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const data = await phaseOne(h, 'groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' });
+
+    const preview = data.preview as Json;
+    expect(preview.alreadyInCart).toBe('yes (quantity not readable)');
+    expect(String(preview.cartWarning)).toMatch(/already in your cart/i);
+    await h.close();
+  });
+
+  it('refuses with DRAFT_CHANGED when the cart line changed between phases', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValue({ items: [{ optionId: 'opt-a', quantity: 3 }] });
+    const { webClient, readClient, addToCart } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+    const args = { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' };
+
+    const { confirmToken } = await phaseOne(h, 'groupon_purchase', args);
+    const res = await h.callTool('groupon_purchase', { ...args, confirmToken });
+
+    expect(parseToolResult<Json>(res).error).toBe('DRAFT_CHANGED');
+    expect(addToCart).not.toHaveBeenCalled();
     await h.close();
   });
 
@@ -260,7 +311,11 @@ describe('groupon_purchase', () => {
 
   it('PHASE 2: the returned confirmToken performs the add exactly once', async () => {
     const { webClient, readClient, addToCart } = makeClients({
-      getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] }),
+      getCart: vi
+        .fn()
+        .mockResolvedValueOnce({ items: [] }) // phase 1 preview
+        .mockResolvedValueOnce({ items: [] })
+        .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] }),
     });
     const h = await harness(webClient, readClient);
     const args = { dealId: 'versailles-massage-bar-1', optionId: 'opt-a' };
@@ -365,6 +420,18 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
+  it('rejects a quantity above 10 before reading or mutating anything (fleet-audit #488)', async () => {
+    const { webClient, readClient, addToCart, getDeal } = makeClients();
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a', quantity: 100000 });
+
+    expect(res.isError).toBe(true);
+    expect(getDeal).not.toHaveBeenCalled();
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
   it('errors (and mutates nothing) when optionId is omitted on a multi-option deal', async () => {
     const { webClient, readClient, addToCart } = makeClients();
     const h = await harness(webClient, readClient);
@@ -380,7 +447,11 @@ describe('groupon_purchase', () => {
   it('CONFIRMED: adds the item, re-reads the cart, and reports verified + checkout URL', async () => {
     const cartAfter = { items: [{ optionId: 'opt-b' }] };
     const { webClient, readClient, addToCart, getCart } = makeClients({
-      getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce(cartAfter),
+      getCart: vi
+        .fn()
+        .mockResolvedValueOnce({ items: [] }) // phase 1 preview
+        .mockResolvedValueOnce({ items: [] })
+        .mockResolvedValueOnce(cartAfter),
     });
     const h = await harness(webClient, readClient);
 
@@ -398,8 +469,9 @@ describe('groupon_purchase', () => {
       quantity: 3,
       isGift: true,
     });
-    // Snapshot before + re-read after, to verify the add landed.
-    expect(getCart).toHaveBeenCalledTimes(2);
+    // A read on each phase (the confirmed one is the "before" snapshot) +
+    // a re-read after, to verify the add landed.
+    expect(getCart).toHaveBeenCalledTimes(3);
 
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data.added).toBe(true);
@@ -414,6 +486,7 @@ describe('groupon_purchase', () => {
     // present from earlier, so a presence-only check said verified: true.
     const getCart = vi
       .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] }) // phase 1 preview
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] })
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] });
     const { webClient, readClient } = makeClients({ getCart });
@@ -435,6 +508,7 @@ describe('groupon_purchase', () => {
   it('verifies against the line quantity and reports it (incremented from an existing line)', async () => {
     const getCart = vi
       .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] }) // phase 1 preview
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] })
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 4 }] });
     const { webClient, readClient } = makeClients({ getCart });
@@ -455,6 +529,7 @@ describe('groupon_purchase', () => {
   it('verifies a line whose quantity was set to the requested value', async () => {
     const getCart = vi
       .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] }) // phase 1 preview
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 1 }] })
       .mockResolvedValueOnce({ items: [{ optionId: 'opt-b', quantity: 3 }] });
     const { webClient, readClient } = makeClients({ getCart });
@@ -536,7 +611,11 @@ describe('groupon_purchase', () => {
       ],
     };
     const { webClient, readClient } = makeClients({
-      getCart: vi.fn().mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce(cartAfter),
+      getCart: vi
+        .fn()
+        .mockResolvedValueOnce({ items: [] }) // phase 1 preview
+        .mockResolvedValueOnce({ items: [] })
+        .mockResolvedValueOnce(cartAfter),
     });
     const h = await harness(webClient, readClient);
 

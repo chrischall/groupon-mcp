@@ -11,7 +11,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // returns Groupon's category taxonomy tree (by default a compact {title, url,
 // children} tree).
 import { isCompact, viewArg } from "../view.js";
-import { minifiedResult } from "@chrischall/mcp-utils";
+import { minifiedResult, toolAnnotations } from "@chrischall/mcp-utils";
 import { z } from "zod";
 import type { GrouponClient, GetDeal, MainNavigation } from "../client.js";
 
@@ -146,7 +146,11 @@ export function registerDetailTools(
         "Fetch a single Groupon deal by its permalink slug (or full deal URL). Returns the slim projection by " +
         "default (title, subtitle, merchant, price, rating, division, url, and every option's id/title/price/isSoldOut — pass an option id to groupon_purchase); " +
         'set view="full" for Groupon\'s whole record.',
-      annotations: { readOnlyHint: true },
+      annotations: toolAnnotations({
+        title: "Get a Groupon deal",
+        readOnly: true,
+        openWorld: true,
+      }),
       inputSchema: z.object({
         dealId: z
           .string()
@@ -175,7 +179,11 @@ export function registerDetailTools(
       description:
         "Fetch Groupon's category taxonomy tree. Returns a slim {title, url, children} tree by default; " +
         'set view="full" for Groupon\'s whole payload.',
-      annotations: { readOnlyHint: true },
+      annotations: toolAnnotations({
+        title: "List Groupon categories",
+        readOnly: true,
+        openWorld: true,
+      }),
       inputSchema: z.object({
         view: viewArg(),
       }),
