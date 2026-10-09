@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.6](https://github.com/chrischall/groupon-mcp/compare/v1.1.5...v1.1.6) (2026-10-09)
+
+
+### Bug Fixes
+
+* annotate tools truthfully and sync manifests with the served tools ([#141](https://github.com/chrischall/groupon-mcp/issues/141)) ([5c9b9e2](https://github.com/chrischall/groupon-mcp/commit/5c9b9e230c435de2e197e6166c074972f5af0d8f))
+* **cart:** clear only the cart's line items and refuse when the cart has changed ([#138](https://github.com/chrischall/groupon-mcp/issues/138)) ([396e164](https://github.com/chrischall/groupon-mcp/commit/396e164d742795b53b451c27e2faa72546d70b88))
+* declare the plugin MCP config under the mcpServers key Claude Code reads ([#142](https://github.com/chrischall/groupon-mcp/issues/142)) ([591d45a](https://github.com/chrischall/groupon-mcp/commit/591d45a91e120cd24bdb9b76a911abd17677ce39))
+* **deps:** bump source-map-js ([#140](https://github.com/chrischall/groupon-mcp/issues/140)) ([e7ab240](https://github.com/chrischall/groupon-mcp/commit/e7ab240f1a2af9e762fc777cd3bb86e3bdccdf3b))
+* **deps:** update @chrischall/mcp-utils to 3.0.0 ([#139](https://github.com/chrischall/groupon-mcp/issues/139)) ([1c64be4](https://github.com/chrischall/groupon-mcp/commit/1c64be405c5fde7f45b7f8d4e682490d4903aa79))
+* resolve low-severity audit findings ([#136](https://github.com/chrischall/groupon-mcp/issues/136)) ([5dfe50a](https://github.com/chrischall/groupon-mcp/commit/5dfe50ab9bfbb353113a07aaf44767d1c5e6d175))
+
 ## [1.1.5](https://github.com/chrischall/groupon-mcp/compare/v1.1.4...v1.1.5) (2026-10-07)
 
 
