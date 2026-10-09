@@ -98,6 +98,10 @@ reads) — not credentials, and they can go stale on a Groupon frontend redeploy
 - A logged-out session comes back with a **null/absent `getCart`** (rather than an
   empty-but-present cart) → the client maps that (and a 401/403) to a distinct
   `SessionExpiredError`.
+- Line items: `groupon_clear_cart` reads each line's `optionId` from the top-level
+  `items` (or `cartItems` / `lineItems`) list only, and fails closed when none is
+  present. That path has not been live-captured yet: confirm it against a signed-in
+  `GetCart` response and narrow the list to the real key.
 
 ### `createOrUpdateCartItem` — ADD / update a line item  ✅
 - `sha256Hash`: `d0aeb632be4f1316c0b83c5b0d1fe556363f9e149ce7fd590728bfe4d41b782d`
