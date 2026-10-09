@@ -44,6 +44,12 @@ export interface GrouponTransportOptions {
   retryStatuses: number[];
   /** Hint attached to the "still throttled after a retry" error. */
   rateLimitHint: string;
+  /**
+   * Hint on the `WriteOutcomeUnknownError` a timed-out / dropped mutation
+   * throws (the POST was sent, so it may have applied). Name the tool that
+   * checks. Reads pass `idempotent: true` per call and never see it.
+   */
+  writeOutcomeHint?: string;
 }
 
 export interface GrouponTransport {
@@ -68,6 +74,7 @@ export function createGrouponTransport(opts: GrouponTransportOptions): GrouponTr
     sleep: opts.sleep,
     timeout: REQUEST_TIMEOUT_MS,
     baseHeaders: { 'apollographql-client-name': CLIENT_NAME },
+    ...(opts.writeOutcomeHint ? { writeOutcomeHint: opts.writeOutcomeHint } : {}),
     retry: {
       count: 1,
       delayMs: DEFAULT_RETRY_DELAY_MS,
@@ -101,8 +108,10 @@ export interface MapErrorOptions {
 /**
  * Translate a transport failure into the actionable {@link McpToolError}s the
  * Groupon tools have always surfaced. Errors that are already actionable
- * (McpToolError, SessionExpiredError, EdgeBlockedError, …) pass through
- * untouched.
+ * (McpToolError — including the `WriteOutcomeUnknownError` a timed-out cart
+ * mutation throws — SessionExpiredError, EdgeBlockedError, …) pass through
+ * untouched. A `RequestTimeoutError` only reaches here from a read (sent with
+ * `idempotent: true`).
  */
 export function mapTransportError(err: unknown, opts: MapErrorOptions): unknown {
   if (err instanceof McpToolError) return err;
