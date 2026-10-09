@@ -407,6 +407,7 @@ export function registerCartTools(
       annotations: toolAnnotations({
         title: "Add a Groupon deal to your cart",
         readOnly: false,
+        destructive: true,
         openWorld: true,
       }),
       inputSchema: z.object({
@@ -533,6 +534,7 @@ export function registerCartTools(
       annotations: toolAnnotations({
         title: "Clear your Groupon cart",
         readOnly: false,
+        destructive: true,
         openWorld: true,
       }),
       inputSchema: z.object({
