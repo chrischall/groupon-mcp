@@ -828,6 +828,46 @@ describe('groupon_clear_cart', () => {
     await h.close();
   });
 
+  it.each([
+    ['an empty object', {}],
+    ['items: null', { items: null }],
+  ])('CONFIRMED: reports the removals (verified=false) when the post-clear re-read is %s', async (_label, afterShape) => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
+      .mockResolvedValueOnce(afterShape);
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await confirmed(h, 'groupon_clear_cart');
+
+    expect(res.isError).toBeFalsy();
+    expect(deleteCartItem).toHaveBeenCalledTimes(2);
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data).toMatchObject({ cleared: true, verified: false, removed: 2, removedOptionIds: ['opt-a', 'opt-b'] });
+    expect(String(data.note)).toMatch(/could not confirm|groupon_view_cart/i);
+    await h.close();
+  });
+
+  it('CONFIRMED: reports the removals (verified=false) when the post-clear re-read fails', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] })
+      .mockRejectedValueOnce(new Error('network down'));
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await confirmed(h, 'groupon_clear_cart');
+
+    expect(res.isError).toBeFalsy();
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data).toMatchObject({ cleared: true, verified: false, removed: 1, removedOptionIds: ['opt-a'] });
+    expect(String(data.note)).toContain('network down');
+    await h.close();
+  });
+
   it('does not delete optionIds found outside the line items (recommendations, saved-for-later)', async () => {
     const cart = { items: [{ optionId: 'opt-a' }], recommendations: [{ optionId: 'rec-1' }] };
     const getCart = vi
@@ -892,6 +932,8 @@ describe('groupon_clear_cart', () => {
     const text = JSON.stringify(res.content);
     expect(text).toMatch(/changed/i);
     expect(text).toContain('opt-new');
+    // The hint must steer a retry away from the stale list.
+    expect(text).toMatch(/without expectedOptionIds/);
     expect(deleteCartItem).not.toHaveBeenCalled();
     await h.close();
   });

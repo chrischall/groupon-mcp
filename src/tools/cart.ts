@@ -560,7 +560,7 @@ export function registerCartTools(
               hint:
                 (added.length > 0 ? `Now in the cart but not expected: ${added.join(", ")}. ` : "") +
                 (gone.length > 0 ? `Expected but no longer in the cart: ${gone.join(", ")}. ` : "") +
-                "Run groupon_clear_cart again without a token to preview the current cart.",
+                "Do not retry with the same list: run groupon_clear_cart again without expectedOptionIds and without a token to preview the current cart, then pass the new optionIds it lists.",
             },
           );
         }
@@ -617,8 +617,22 @@ export function registerCartTools(
         }
         removedIds.push(id);
       }
-      const after = await webClient.getCart();
-      const remaining = cartLineOptionIds(after);
+      // Every delete has already gone through, so a failed or unrecognisable
+      // re-read must not surface as an error that hides those removals: report
+      // them as an unverified clear instead.
+      let remaining: string[];
+      try {
+        remaining = cartLineOptionIds(await webClient.getCart());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return minifiedResult({
+          cleared: true,
+          verified: false,
+          removed: optionIds.length,
+          removedOptionIds: removedIds,
+          note: `Groupon accepted all ${optionIds.length} removals, but the cart could not be re-read to confirm it is empty (${message}). Check groupon_view_cart.`,
+        });
+      }
       const verified = remaining.length === 0;
 
       if (verified) {
