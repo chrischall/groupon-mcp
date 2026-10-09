@@ -420,6 +420,18 @@ describe('groupon_purchase', () => {
     await h.close();
   });
 
+  it('rejects a quantity above 10 before reading or mutating anything (fleet-audit #488)', async () => {
+    const { webClient, readClient, addToCart, getDeal } = makeClients();
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_purchase', { dealId: 'versailles-massage-bar-1', optionId: 'opt-a', quantity: 100000 });
+
+    expect(res.isError).toBe(true);
+    expect(getDeal).not.toHaveBeenCalled();
+    expect(addToCart).not.toHaveBeenCalled();
+    await h.close();
+  });
+
   it('errors (and mutates nothing) when optionId is omitted on a multi-option deal', async () => {
     const { webClient, readClient, addToCart } = makeClients();
     const h = await harness(webClient, readClient);

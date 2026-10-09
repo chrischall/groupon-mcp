@@ -50,6 +50,10 @@ import { stripDealId } from "./detail.js";
  *  user completes payment here themselves. */
 const CHECKOUT_URL = "https://www.groupon.com/checkout/cart";
 
+/** Upper bound on one add, so a runaway quantity fails validation here rather
+ *  than relying on Groupon to reject it. */
+const MAX_QUANTITY = 10;
+
 
 /**
  * Collect every distinct `optionId` value anywhere in a cart payload, walking
@@ -364,9 +368,9 @@ export function registerCartTools(
           .describe(
             "Which deal option to buy (an option id from groupon_get_deal). Required when the deal has more than one option; may be omitted for a single-option deal.",
           ),
-        quantity: PositiveInt.default(1).describe(
-          "How many to add (default 1).",
-        ),
+        quantity: PositiveInt.max(MAX_QUANTITY)
+          .default(1)
+          .describe(`How many to add (1-${MAX_QUANTITY}, default 1).`),
         isGift: z
           .boolean()
           .default(false)

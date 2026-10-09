@@ -100,25 +100,17 @@ export class StalePersistedQueryError extends McpToolError {
 export class GrouponClient {
   /** The GraphQL endpoint this client posts to (after any GROUPON_GRAPHQL_URL override). */
   readonly endpoint: string;
-  private readonly configError: Error | null;
   private readonly transport: GrouponTransport;
   private readonly cache: ResponseCache;
 
-  /**
-   * Deal reads need no credential, so `configError` stays null and the server
-   * always boots. The requireReadable() gate is kept as the seam where a future
-   * write path (purchase / connector) would raise a deferred config error — same
-   * shape the rest of the fleet uses for keyed clients, so the pattern is ready
-   * when the write creds land.
-   */
+  /** Deal reads need no credential, so this client always boots. The cart
+   *  writes live in the separate, cookie-carrying GrouponWebClient. */
   constructor(opts: GrouponClientOptions = {}) {
     const now = opts.now ?? Date.now;
     const cacheTtlMs = opts.cacheTtlMs ?? readTtlMsEnv('GROUPON_CACHE_TTL', DEFAULT_CACHE_TTL_MS);
     this.cache = createResponseCache({ ttlMs: { dynamic: cacheTtlMs }, now });
     const endpoint = (opts.endpoint ?? readEnvVar('GROUPON_GRAPHQL_URL') ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
     this.endpoint = endpoint;
-    // Reads are unauthenticated: no config error to defer.
-    this.configError = null;
     this.transport = createGrouponTransport({
       endpoint,
       service: SERVICE,
@@ -127,11 +119,6 @@ export class GrouponClient {
       retryStatuses: READ_RETRY_STATUSES,
       rateLimitHint: RATE_LIMIT_HINT,
     });
-  }
-
-  /** Gate kept for the future write path; a no-op for the read-only MVP. */
-  private requireReadable(): void {
-    if (this.configError) throw this.configError;
   }
 
   /**
@@ -216,7 +203,6 @@ export class GrouponClient {
    * bot/challenge interstitial).
    */
   private async request<T>(batch: unknown[]): Promise<T> {
-    this.requireReadable();
     let parsed: unknown;
     try {
       parsed = await this.transport.api.fetchJson('POST', this.transport.path, { body: batch });

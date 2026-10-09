@@ -11,7 +11,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // variants, option grids, and marketing blobs; `view="full"` returns the cards
 // whole.
 import { isCompact, viewArg } from "../view.js";
-import { minifiedResult } from "@chrischall/mcp-utils";
+import { minifiedResult, toolAnnotations } from "@chrischall/mcp-utils";
 import { z } from "zod";
 import type { GrouponClient, BrowseDealFeed } from "../client.js";
 
@@ -75,7 +75,11 @@ export function registerDealTools(
         'Search or browse Groupon deals for a city (division). Pass `query` for a free-text search (e.g. "massage", ' +
         '"pizza"); omit it for a plain category/city browse. Returns slim deal summaries by default; ' +
         'set view="full" for Groupon\'s whole cards.',
-      annotations: { readOnlyHint: true },
+      annotations: toolAnnotations({
+        title: "Search Groupon deals",
+        readOnly: true,
+        openWorld: true,
+      }),
       inputSchema: z.object({
         query: z
           .string()
