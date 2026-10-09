@@ -191,7 +191,12 @@ export class GrouponClient {
    * {@link StalePersistedQueryError}.
    */
   async probe(): Promise<void> {
-    const parsed = await this.transport.api.fetchJson('POST', this.transport.path, { body: [buildMainNavigation()] });
+    const parsed = await this.transport.api.fetchJson('POST', this.transport.path, {
+      body: [buildMainNavigation()],
+      // A persisted-query read over POST: safe to repeat, so a timeout stays a
+      // RequestTimeoutError rather than mcp-utils 3's WriteOutcomeUnknownError.
+      idempotent: true,
+    });
     this.assertNoPersistedQueryError(parsed);
   }
 
@@ -205,7 +210,7 @@ export class GrouponClient {
   private async request<T>(batch: unknown[]): Promise<T> {
     let parsed: unknown;
     try {
-      parsed = await this.transport.api.fetchJson('POST', this.transport.path, { body: batch });
+      parsed = await this.transport.api.fetchJson('POST', this.transport.path, { body: batch, idempotent: true });
     } catch (err) {
       throw mapTransportError(err, {
         service: SERVICE,

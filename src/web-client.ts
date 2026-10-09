@@ -22,6 +22,10 @@ import {
 const DEFAULT_ENDPOINT = 'https://www.groupon.com/mobilenextapi/graphql';
 const SERVICE = 'Groupon cart';
 const RATE_LIMIT_HINT = 'Space out cart operations and retry shortly.';
+// A cart mutation that timed out or lost its connection was SENT, so it may
+// have applied: point at the read that tells, never at a blind resend.
+const MUTATION_OUTCOME_HINT =
+  'The cart change may have happened. Check groupon_view_cart before retrying; do not resend blindly.';
 const HTTP_HINT =
   'Groupon masks GraphQL errors as opaque 400 HTML. If this started suddenly, the persisted-query hash in graphql-ops.ts may need re-capture.';
 // GetCart is a read: retry throttling (429) and transient unavailability (503).
@@ -116,10 +120,18 @@ export class GrouponWebClient {
     this.endpointError = cookieEndpointError(endpoint);
     const fetchImpl = opts.fetchImpl ?? fetch;
     const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    const transport = (retryStatuses: number[]) =>
-      createGrouponTransport({ endpoint, service: SERVICE, fetchImpl, sleep, retryStatuses, rateLimitHint: RATE_LIMIT_HINT });
+    const transport = (retryStatuses: number[], writeOutcomeHint?: string) =>
+      createGrouponTransport({
+        endpoint,
+        service: SERVICE,
+        fetchImpl,
+        sleep,
+        retryStatuses,
+        rateLimitHint: RATE_LIMIT_HINT,
+        writeOutcomeHint,
+      });
     this.readTransport = transport(READ_RETRY_STATUSES);
-    this.mutationTransport = transport(MUTATION_RETRY_STATUSES);
+    this.mutationTransport = transport(MUTATION_RETRY_STATUSES, MUTATION_OUTCOME_HINT);
     this.resolveCookie =
       opts.resolveCookie ??
       (async () => {
@@ -215,6 +227,9 @@ export class GrouponWebClient {
       transport.api.fetchJson('POST', transport.path, {
         body: [op],
         headers: { 'x-operation-name': operationName, Cookie: cookie },
+        // GetCart is a read over POST: safe to repeat. A mutation is not, so a
+        // timeout on one throws WriteOutcomeUnknownError (mcp-utils 3).
+        idempotent: kind === 'read',
       });
 
     let parsed: unknown;

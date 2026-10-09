@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { McpToolError } from '@chrischall/mcp-utils';
+import { McpToolError, WriteOutcomeUnknownError } from '@chrischall/mcp-utils';
 import { GrouponWebClient, SessionExpiredError } from '../src/web-client.js';
 import {
   GET_CART_HASH,
@@ -280,6 +280,47 @@ describe('GrouponWebClient', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // mcp-utils 3: a cart MUTATION that was sent and then timed out may have
+  // applied, so it surfaces as WriteOutcomeUnknownError (never replayed), not
+  // a retry-safe "timed out" — and the hint points at groupon_view_cart.
+  it('surfaces a timed-out cart mutation as WriteOutcomeUnknownError, sent once', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError')),
+            );
+          }),
+      );
+      const client = makeClient(fetchImpl as unknown as typeof fetch);
+      const pending = client
+        .addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'u', quantity: 1, isGift: false })
+        .catch((e) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const err = await pending;
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(err).toBeInstanceOf(WriteOutcomeUnknownError);
+      expect(err).toBeInstanceOf(McpToolError);
+      expect(err.outcomeUnknown).toBe(true);
+      expect(err.timedOut).toBe(true);
+      expect(String(err.hint)).toMatch(/groupon_view_cart/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a dropped connection on a cart mutation as WriteOutcomeUnknownError', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const err = await client.deleteCartItem({ optionId: 'o' }).catch((e) => e);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(WriteOutcomeUnknownError);
+    expect(err.timedOut).toBe(false);
+    expect(String(err.hint)).toMatch(/groupon_view_cart/);
   });
 
   it('honours Retry-After with fake timers on GetCart (sleeps 2s, then replays)', async () => {
