@@ -58,8 +58,9 @@ const MAX_QUANTITY = 10;
 /**
  * Collect every distinct `optionId` value anywhere in a cart payload, walking
  * the whole tree (cart line-item shape is not otherwise modelled, and the
- * authenticated shape can drift). Cycle-safe. Used both to verify an add landed
- * and to enumerate line items for a clear.
+ * authenticated shape can drift). Cycle-safe. Used only to verify an add
+ * landed; groupon_clear_cart enumerates what to delete with
+ * {@link cartLineOptionIds}, which reads the line items alone.
  */
 export function collectCartOptionIds(cart: unknown): string[] {
   const ids: string[] = [];
@@ -87,6 +88,56 @@ export function collectCartOptionIds(cart: unknown): string[] {
     }
   };
   walk(cart);
+  return [...new Set(ids)];
+}
+
+/** Keys under which a GetCart payload may hold its line-item list. Only these
+ *  top-level lists are read as line items; anything else in the payload
+ *  (recommendations, upsells, saved-for-later) is ignored. */
+const CART_LINE_ITEM_KEYS = ["items", "cartItems", "lineItems"] as const;
+
+/**
+ * The optionIds of the cart's LINE ITEMS, de-duplicated, in cart order.
+ *
+ * Unlike {@link collectCartOptionIds} this does not walk the whole payload: it
+ * reads the `optionId` of each entry in the cart's top-level line-item list
+ * ({@link CART_LINE_ITEM_KEYS}), so an optionId inside a recommendation or a
+ * nested sub-object is never mistaken for something to delete (fleet-audit
+ * #484). It fails closed: a payload with no recognisable line-item list, or a
+ * line item without a string `optionId`, throws rather than reading as an
+ * empty cart, because `groupon_clear_cart` would otherwise report a non-empty
+ * cart as already clear.
+ */
+export function cartLineOptionIds(cart: unknown): string[] {
+  const obj =
+    cart !== null && typeof cart === "object" && !Array.isArray(cart)
+      ? (cart as Record<string, unknown>)
+      : {};
+  const key = CART_LINE_ITEM_KEYS.find((k) => Array.isArray(obj[k]));
+  if (!key) {
+    throw new McpToolError(
+      "Could not find the line items in your Groupon cart.",
+      {
+        hint: `The GetCart response shape may have drifted (expected a top-level ${CART_LINE_ITEM_KEYS.join(" / ")} list; got keys: ${Object.keys(obj).join(", ") || "(none)"}). Check the cart with groupon_view_cart and clear it on groupon.com.`,
+      },
+    );
+  }
+  const ids: string[] = [];
+  for (const line of obj[key] as unknown[]) {
+    const id =
+      line !== null && typeof line === "object"
+        ? (line as Record<string, unknown>).optionId
+        : undefined;
+    if (typeof id !== "string" || !id) {
+      throw new McpToolError(
+        "A line item in your Groupon cart has no optionId, so it cannot be removed.",
+        {
+          hint: "The GetCart line-item shape may have drifted (expected a string `optionId` on each line). Check the cart with groupon_view_cart and clear it on groupon.com.",
+        },
+      );
+    }
+    ids.push(id);
+  }
   return [...new Set(ids)];
 }
 
@@ -484,11 +535,36 @@ export function registerCartTools(
         readOnly: false,
         openWorld: true,
       }),
-      inputSchema: z.object({ confirmToken: confirmTokenParam }),
+      inputSchema: z.object({
+        expectedOptionIds: z
+          .array(NonEmptyString)
+          .optional()
+          .describe(
+            "The optionIds the preview listed. When given, the clear is refused if the cart's line items are no longer exactly these (in any order).",
+          ),
+        confirmToken: confirmTokenParam,
+      }),
     },
-    async ({ confirmToken }, ctx) => {
+    async ({ expectedOptionIds, confirmToken }, ctx) => {
       const cart = await webClient.getCart();
-      const optionIds = collectCartOptionIds(cart);
+      const optionIds = cartLineOptionIds(cart);
+
+      if (expectedOptionIds) {
+        const expected = new Set(expectedOptionIds);
+        const added = optionIds.filter((id) => !expected.has(id));
+        const gone = [...expected].filter((id) => !optionIds.includes(id));
+        if (added.length > 0 || gone.length > 0) {
+          throw new McpToolError(
+            "Your Groupon cart has changed since the preview, so nothing was removed.",
+            {
+              hint:
+                (added.length > 0 ? `Now in the cart but not expected: ${added.join(", ")}. ` : "") +
+                (gone.length > 0 ? `Expected but no longer in the cart: ${gone.join(", ")}. ` : "") +
+                "Do not retry with the same list: run groupon_clear_cart again without expectedOptionIds and without a token to preview the current cart, then pass the new optionIds it lists.",
+            },
+          );
+        }
+      }
 
       if (optionIds.length === 0) {
         return minifiedResult({
@@ -502,7 +578,7 @@ export function registerCartTools(
       const preview = {
         itemCount: optionIds.length,
         optionIds,
-        note: "Once confirmed, every line item above is removed from your cart.",
+        note: "Once confirmed, every line item above is removed from your cart. Pass these optionIds back as expectedOptionIds to refuse the clear if the cart has changed.",
       };
       const gate = await confirmWrite(ctx, {
         tool: "groupon_clear_cart",
@@ -541,8 +617,22 @@ export function registerCartTools(
         }
         removedIds.push(id);
       }
-      const after = await webClient.getCart();
-      const remaining = collectCartOptionIds(after);
+      // Every delete has already gone through, so a failed or unrecognisable
+      // re-read must not surface as an error that hides those removals: report
+      // them as an unverified clear instead.
+      let remaining: string[];
+      try {
+        remaining = cartLineOptionIds(await webClient.getCart());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return minifiedResult({
+          cleared: true,
+          verified: false,
+          removed: optionIds.length,
+          removedOptionIds: removedIds,
+          note: `Groupon accepted all ${optionIds.length} removals, but the cart could not be re-read to confirm it is empty (${message}). Check groupon_view_cart.`,
+        });
+      }
       const verified = remaining.length === 0;
 
       if (verified) {

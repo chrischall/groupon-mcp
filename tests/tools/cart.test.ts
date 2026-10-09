@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTestHarness, parseToolResult, type TestHarness } from '@chrischall/mcp-utils/test';
 import type { ElicitResult } from '@modelcontextprotocol/server';
 import { CONFIRM_FLOW_SENTENCE } from '@chrischall/mcp-utils';
-import { registerCartTools, resolveCartItem, collectCartOptionIds } from '../../src/tools/cart.js';
+import { registerCartTools, resolveCartItem, collectCartOptionIds, cartLineOptionIds } from '../../src/tools/cart.js';
 import type { GrouponClient, GetDeal } from '../../src/client.js';
 import type { GrouponWebClient } from '../../src/web-client.js';
 
@@ -172,6 +172,35 @@ describe('collectCartOptionIds', () => {
   it('returns [] for an empty / itemless cart', () => {
     expect(collectCartOptionIds({ items: [] })).toEqual([]);
     expect(collectCartOptionIds(null)).toEqual([]);
+  });
+});
+
+describe('cartLineOptionIds (fleet-audit #484)', () => {
+  it('reads only the line items, not optionIds elsewhere in the cart payload', () => {
+    const cart = {
+      items: [{ optionId: 'a', deal: { optionId: 'nested' } }, { optionId: 'b' }, { optionId: 'a' }],
+      recommendations: [{ optionId: 'rec' }],
+      savedForLater: { items: [{ optionId: 'saved' }] },
+    };
+    expect(cartLineOptionIds(cart)).toEqual(['a', 'b']);
+  });
+
+  it('accepts the cartItems / lineItems spellings of the line-item list', () => {
+    expect(cartLineOptionIds({ cartItems: [{ optionId: 'a' }] })).toEqual(['a']);
+    expect(cartLineOptionIds({ lineItems: [{ optionId: 'b' }] })).toEqual(['b']);
+  });
+
+  it('returns [] for a cart whose line-item list is empty', () => {
+    expect(cartLineOptionIds({ items: [], recommendations: [{ optionId: 'rec' }] })).toEqual([]);
+  });
+
+  it('throws rather than calling a cart empty when there is no recognisable line-item list', () => {
+    expect(() => cartLineOptionIds({ something: [{ optionId: 'a' }] })).toThrow(/line items/i);
+    expect(() => cartLineOptionIds(null)).toThrow(/line items/i);
+  });
+
+  it('throws when a line item carries no string optionId', () => {
+    expect(() => cartLineOptionIds({ items: [{ optionUuid: 'u-1' }] })).toThrow(/optionId/);
   });
 });
 
@@ -796,6 +825,145 @@ describe('groupon_clear_cart', () => {
 
     const data = parseToolResult<Record<string, unknown>>(res);
     expect(data).toMatchObject({ cleared: true, verified: false, removed: 1, remaining: ['opt-a'] });
+    await h.close();
+  });
+
+  it.each([
+    ['an empty object', {}],
+    ['items: null', { items: null }],
+  ])('CONFIRMED: reports the removals (verified=false) when the post-clear re-read is %s', async (_label, afterShape) => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
+      .mockResolvedValueOnce(afterShape);
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await confirmed(h, 'groupon_clear_cart');
+
+    expect(res.isError).toBeFalsy();
+    expect(deleteCartItem).toHaveBeenCalledTimes(2);
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data).toMatchObject({ cleared: true, verified: false, removed: 2, removedOptionIds: ['opt-a', 'opt-b'] });
+    expect(String(data.note)).toMatch(/could not confirm|groupon_view_cart/i);
+    await h.close();
+  });
+
+  it('CONFIRMED: reports the removals (verified=false) when the post-clear re-read fails', async () => {
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }] })
+      .mockRejectedValueOnce(new Error('network down'));
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await confirmed(h, 'groupon_clear_cart');
+
+    expect(res.isError).toBeFalsy();
+    const data = parseToolResult<Record<string, unknown>>(res);
+    expect(data).toMatchObject({ cleared: true, verified: false, removed: 1, removedOptionIds: ['opt-a'] });
+    expect(String(data.note)).toContain('network down');
+    await h.close();
+  });
+
+  it('does not delete optionIds found outside the line items (recommendations, saved-for-later)', async () => {
+    const cart = { items: [{ optionId: 'opt-a' }], recommendations: [{ optionId: 'rec-1' }] };
+    const getCart = vi
+      .fn()
+      .mockResolvedValueOnce(cart)
+      .mockResolvedValueOnce(cart)
+      .mockResolvedValueOnce({ items: [], recommendations: [{ optionId: 'rec-1' }] });
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await confirmed(h, 'groupon_clear_cart');
+
+    expect(deleteCartItem.mock.calls.map((c) => c[0])).toEqual([{ optionId: 'opt-a' }]);
+    expect(parseToolResult<Json>(res)).toMatchObject({ cleared: true, verified: true, removed: 1 });
+    await h.close();
+  });
+
+  it('reports an empty cart only when the line-item list is empty, ignoring recommendations', async () => {
+    const getCart = vi.fn().mockResolvedValue({ items: [], recommendations: [{ optionId: 'rec-1' }] });
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_clear_cart', {});
+
+    expect(parseToolResult<Json>(res)).toMatchObject({ cleared: true, removed: 0 });
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('errors instead of claiming the cart is empty when line items carry no optionId', async () => {
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionUuid: 'u-1' }] });
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_clear_cart', {});
+
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/optionId/);
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('PHASE 1 tells the caller to pass the previewed optionIds back as expectedOptionIds', async () => {
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }] });
+    const { webClient, readClient } = makeClients({ getCart });
+    const h = await harness(webClient, readClient);
+
+    const data = await phaseOne(h, 'groupon_clear_cart', {});
+
+    expect(String((data.preview as Json).note)).toMatch(/expectedOptionIds/);
+    await h.close();
+  });
+
+  it('refuses, deleting nothing, when expectedOptionIds does not match the cart', async () => {
+    const getCart = vi.fn().mockResolvedValue({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-new' }] });
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient, async () => ({ action: 'accept', content: { confirmed: true } }));
+
+    const res = await h.callTool('groupon_clear_cart', { expectedOptionIds: ['opt-a'] });
+
+    expect(res.isError).toBe(true);
+    const text = JSON.stringify(res.content);
+    expect(text).toMatch(/changed/i);
+    expect(text).toContain('opt-new');
+    // The hint must steer a retry away from the stale list.
+    expect(text).toMatch(/without expectedOptionIds/);
+    expect(deleteCartItem).not.toHaveBeenCalled();
+    await h.close();
+  });
+
+  it('clears when expectedOptionIds matches the cart (order-insensitive)', async () => {
+    const getCart = vi
+      .fn()
+      // The elicitation gate re-runs the handler after acceptance (a fresh read),
+      // so the cart is read twice before the deletes and once to verify.
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
+      .mockResolvedValueOnce({ items: [{ optionId: 'opt-a' }, { optionId: 'opt-b' }] })
+      .mockResolvedValueOnce({ items: [] });
+    const { webClient, readClient, deleteCartItem } = makeClients({ getCart });
+    const h = await harness(webClient, readClient, async () => ({ action: 'accept', content: { confirmed: true } }));
+
+    const res = await h.callTool('groupon_clear_cart', { expectedOptionIds: ['opt-b', 'opt-a'] });
+    expect(res.isError).toBeFalsy();
+    expect(deleteCartItem).toHaveBeenCalledTimes(2);
+    await h.close();
+  });
+
+  it('refuses when expectedOptionIds lists items but the cart is now empty', async () => {
+    const { webClient, readClient, deleteCartItem } = makeClients();
+    const h = await harness(webClient, readClient);
+
+    const res = await h.callTool('groupon_clear_cart', { expectedOptionIds: ['opt-a'] });
+
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/changed/i);
+    expect(deleteCartItem).not.toHaveBeenCalled();
     await h.close();
   });
 
