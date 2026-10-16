@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.8](https://github.com/chrischall/groupon-mcp/compare/v1.1.7...v1.1.8) (2026-10-16)
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils to 3.0.3 and @fetchproxy/* to 3.6.2 ([#146](https://github.com/chrischall/groupon-mcp/issues/146)) ([d7f3cff](https://github.com/chrischall/groupon-mcp/commit/d7f3cffc686d6e9b6b2f7414277d9704f493ee05))
+* **plugin:** launch the published package so marketplace installs start ([#148](https://github.com/chrischall/groupon-mcp/issues/148)) ([7e8fe1c](https://github.com/chrischall/groupon-mcp/commit/7e8fe1c223834c20269ef72b302dc7c8a6062a7d))
+
 ## [1.1.7](https://github.com/chrischall/groupon-mcp/compare/v1.1.6...v1.1.7) (2026-10-10)
 
 
