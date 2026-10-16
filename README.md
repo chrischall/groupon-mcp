@@ -48,6 +48,20 @@ Reading deals needs no account. The cart tools (`groupon_view_cart`, `groupon_pu
 
 For local dev without the extension, set `GROUPON_SESSION_COOKIE` (see `.env.example`); set `GROUPON_DISABLE_FETCHPROXY=1` to turn the browser path off. The cookie authorizes changes to your cart, so treat it like a password. The cart tools only send it to an `https://*.groupon.com` endpoint, and refuse a `GROUPON_GRAPHQL_URL` override pointing anywhere else.
 
+### Environment
+
+All optional; they mirror the `.mcpb` manifest's settings (the `MCP_CONFIRM_*` family is under [Confirmations](#confirmations)).
+
+| variable | default | |
+|---|---|---|
+| `GROUPON_SESSION_COOKIE` | unset | Full `Cookie` header from a signed-in www.groupon.com request, for the cart tools only. Leave unset to have the bridge pick up your session. Treat it like a password. |
+| `GROUPON_DISABLE_FETCHPROXY` | unset | `1` turns the browser-bridge path off; the cart tools then rely on `GROUPON_SESSION_COOKIE`. |
+| `GROUPON_GRAPHQL_URL` | `https://www.groupon.com/mobilenextapi/graphql` | GraphQL endpoint override. The cart tools refuse any override that is not an `https://*.groupon.com` URL. |
+| `GROUPON_CACHE_TTL` | `60` | Response-cache TTL for reads, in seconds (`0` = off). Raise it if you hit rate limits. |
+| `FETCHPROXY_WS_PORT` | `37149` | Concentrator port the ContextMint Bridge connects to. Every MCP on one machine shares it, so move it for all of them or none. |
+| `FETCHPROXY_WS_HOST` | `127.0.0.1` | Bridge bind interface, a literal IP only. Keep on loopback; it exists for hosted deployments in their own network namespace. |
+| `FETCHPROXY_IDENTITY_DIR` | `~/.fetchproxy/identity/` | Absolute path for the bridge's long-term identity keypair. |
+
 ## Confirmations
 
 The cart writes (`groupon_purchase`, `groupon_clear_cart`) ask you to confirm before they change anything. A client that can show a confirmation prompt (Claude Code) shows one, unless the server sets `MCP_CONFIRM_ELICITATION=off`. Elsewhere, the first call changes nothing and returns a preview plus a `confirmToken`, and only a repeat call with that token proceeds. The token is tied to exactly what was previewed: if the deal's price, the chosen option or quantity, or the cart's contents change between the two calls, the write is refused and a fresh preview is returned. `groupon_purchase`'s preview also shows how many of that option are already in your cart, since Groupon may set the line to the new quantity rather than add to it. It still only fills the cart; you complete payment yourself at the checkout URL. `groupon_clear_cart` removes only the cart's line items, and accepts the previewed `optionIds` back as `expectedOptionIds` so it refuses if the cart has changed; if a removal fails partway it says which items were and were not removed.

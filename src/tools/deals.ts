@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 
-// Deal tools: search / browse Groupon's consumer deal feed. Read-only — this
-// server registers no write (purchase) tools in the read-path MVP.
+// Deal tools: search / browse Groupon's consumer deal feed. These are the
+// read-only tools; the cart writes live in tools/cart.ts.
 //
 // The `groupon_search_deals` tool fronts the verified `BrowseDealFeed` op on
 // Groupon's consumer GraphQL endpoint. Omit `query` for a plain category/city
