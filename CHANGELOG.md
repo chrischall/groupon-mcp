@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.9](https://github.com/chrischall/groupon-mcp/compare/v1.1.8...v1.1.9) (2026-10-17)
+
+
+### Bug Fixes
+
+* **deps:** bump dotenv ([#152](https://github.com/chrischall/groupon-mcp/issues/152)) ([fda7de5](https://github.com/chrischall/groupon-mcp/commit/fda7de5ab51669dbb1018e6d653ea847070ee14c))
+
 ## [1.1.8](https://github.com/chrischall/groupon-mcp/compare/v1.1.7...v1.1.8) (2026-10-16)
 
 
