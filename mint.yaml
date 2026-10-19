@@ -4,6 +4,12 @@ slug: groupon
 summary: >-
   Groupon deals for Claude — search and browse local, goods, and travel
   deals via natural language
+examples:
+  - prompt: Find massage deals in Chicago on Groupon and list the five best-rated with their prices.
+    note: Anonymous read — no sign-in needed.
+  - prompt: What pizza deals does Groupon have in New York right now?
+  - prompt: Show me Groupon's deal categories, then browse the top deals in Syracuse.
+    note: Category tree plus a plain city browse.
 #
 # Hosting note (a comment, not user-facing summary text): this is a
 # BROWSER-BRIDGE MCP — it reaches its site through the user's signed-in
