@@ -349,7 +349,10 @@ describe('GrouponWebClient', () => {
   });
 
   // fleet-audit #483: a 503 from a gateway can arrive AFTER the upstream applied
-  // the mutation, so replaying createOrUpdateCartItem could double an add.
+  // the mutation, so replaying createOrUpdateCartItem could double an add. Since
+  // mcp-utils 3.3.1 (fleet-audit#1405) the shared client reports a 5xx on a sent
+  // write as WriteOutcomeUnknownError itself, carrying the transport's
+  // writeOutcomeHint — so the groupon_view_cart pointer comes from there.
   it('does NOT replay a cart mutation on 503 — it may already have been applied', async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(503, {}));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
@@ -357,17 +360,19 @@ describe('GrouponWebClient', () => {
       .addToCart({ optionId: 'o', dealUuid: 'd', optionUuid: 'u', quantity: 1, isGift: false })
       .catch((e) => e);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(err).toBeInstanceOf(McpToolError);
+    expect(err).toBeInstanceOf(WriteOutcomeUnknownError);
     expect(String(err.message)).toMatch(/503/);
-    expect(String(err.message)).toMatch(/not retried/i);
+    expect(String(err.message)).toMatch(/outcome is unknown/i);
     expect(err.hint).toMatch(/groupon_view_cart/);
   });
 
   it('does NOT replay deleteCartItem on 503 either', async () => {
     const fetchImpl = vi.fn().mockImplementation(async () => jsonRes(503, {}));
     const client = makeClient(fetchImpl as unknown as typeof fetch);
-    await expect(client.deleteCartItem({ optionId: 'o' })).rejects.toThrow(/not retried/i);
+    const err = await client.deleteCartItem({ optionId: 'o' }).catch((e) => e);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(WriteOutcomeUnknownError);
+    expect(err.hint).toMatch(/groupon_view_cart/);
   });
 
   it('still retries a cart mutation once on 429 (guaranteed not processed)', async () => {
