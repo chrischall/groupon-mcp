@@ -98,11 +98,6 @@ export interface MapErrorOptions {
   rateLimitHint: string;
   /** Hint for any other non-2xx (Groupon masks GraphQL errors as opaque 400 HTML). */
   httpHint: string;
-  /**
-   * Message for a 503 on a request that was deliberately NOT retried (a cart
-   * mutation). Unset → the generic HTTP error.
-   */
-  unretried503?: () => McpToolError;
 }
 
 /**
@@ -140,7 +135,6 @@ export function mapTransportError(err: unknown, opts: MapErrorOptions): unknown 
         hint: opts.rateLimitHint,
       });
     }
-    if (err.status === 503 && opts.unretried503) return opts.unretried503();
     return new McpToolError(err.message, { hint: opts.httpHint });
   }
   return err;

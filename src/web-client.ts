@@ -263,11 +263,6 @@ export class GrouponWebClient {
         retryStatuses: transport === this.readTransport ? READ_RETRY_STATUSES : MUTATION_RETRY_STATUSES,
         rateLimitHint: RATE_LIMIT_HINT,
         httpHint: HTTP_HINT,
-        unretried503: () =>
-          new McpToolError(
-            `${SERVICE} was unavailable (503) for ${operationName}; the request was not retried because Groupon may already have applied it.`,
-            { hint: 'Check groupon_view_cart to see whether the change landed before retrying.' },
-          ),
       });
     }
 
