@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.10](https://github.com/chrischall/groupon-mcp/compare/v1.1.9...v1.1.10) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 2 updates ([#158](https://github.com/chrischall/groupon-mcp/issues/158)) ([d917904](https://github.com/chrischall/groupon-mcp/commit/d917904bd65eace230c31d1ebf7dcf4dd88262a4))
+
+
+### Documentation
+
+* **mint:** add sample prompts for the public catalog ([#155](https://github.com/chrischall/groupon-mcp/issues/155)) ([0f12394](https://github.com/chrischall/groupon-mcp/commit/0f12394c727d3548de0c1284930437fe2a1279ef))
+
 ## [1.1.9](https://github.com/chrischall/groupon-mcp/compare/v1.1.8...v1.1.9) (2026-10-17)
 
 
