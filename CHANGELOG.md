@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.11](https://github.com/chrischall/groupon-mcp/compare/v1.1.10...v1.1.11) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 5 updates ([#160](https://github.com/chrischall/groupon-mcp/issues/160)) ([b06f871](https://github.com/chrischall/groupon-mcp/commit/b06f871ec91ce86c50f15121fb8e0fc551a7a1f9))
+
 ## [1.1.10](https://github.com/chrischall/groupon-mcp/compare/v1.1.9...v1.1.10) (2026-10-26)
 
 
