@@ -31,6 +31,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // each deal.options[] entry carries the option's `id` (optionId) and `uuid`
 // (optionUuid) — for the observed deal these two were the same value, but they
 // are read independently so a future divergence is handled correctly.
+import { CART_ALIASES, foodMeta } from "./hints.js";
 import { z } from "zod";
 import {
   CONFIRM_FLOW_SENTENCE,
@@ -388,6 +389,7 @@ export function registerCartTools(
         readOnly: true,
         openWorld: true,
       }),
+      _meta: foodMeta("lookup", { aliases: CART_ALIASES }),
       inputSchema: z.object({}),
     },
     async () => {
@@ -410,6 +412,7 @@ export function registerCartTools(
         destructive: true,
         openWorld: true,
       }),
+      _meta: foodMeta("change", { aliases: ["buy", "buy a deal", "add to cart"] }),
       inputSchema: z.object({
         dealId: NonEmptyString.describe(
           'Deal permalink slug (e.g. "versailles-massage-bar-1") OR a full Groupon deal URL — the last path segment is used.',
@@ -537,6 +540,7 @@ export function registerCartTools(
         destructive: true,
         openWorld: true,
       }),
+      _meta: foodMeta("change", { aliases: ["empty cart", "clear cart"] }),
       inputSchema: z.object({
         expectedOptionIds: z
           .array(NonEmptyString)

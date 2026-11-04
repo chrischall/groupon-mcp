@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // whole.
 import { isCompact, viewArg } from "../view.js";
 import { minifiedResult, toolAnnotations } from "@chrischall/mcp-utils";
+import { DEAL_ALIASES, foodMeta } from "./hints.js";
 import { z } from "zod";
 import type { GrouponClient, BrowseDealFeed } from "../client.js";
 
@@ -80,6 +81,7 @@ export function registerDealTools(
         readOnly: true,
         openWorld: true,
       }),
+      _meta: foodMeta("lookup", { aliases: DEAL_ALIASES }),
       inputSchema: z.object({
         query: z
           .string()
