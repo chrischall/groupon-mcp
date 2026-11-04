@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/chrischall/groupon-mcp/compare/v1.1.10...v1.2.0) (2026-11-04)
+
+
+### Features
+
+* context-group hints, and the skill's context-groups section ([#162](https://github.com/chrischall/groupon-mcp/issues/162)) ([8746280](https://github.com/chrischall/groupon-mcp/commit/8746280872ae08a9fafa7f60903db1988e57bc7d))
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 5 updates ([#160](https://github.com/chrischall/groupon-mcp/issues/160)) ([b06f871](https://github.com/chrischall/groupon-mcp/commit/b06f871ec91ce86c50f15121fb8e0fc551a7a1f9))
+
 ## [1.1.10](https://github.com/chrischall/groupon-mcp/compare/v1.1.9...v1.1.10) (2026-10-26)
 
 
