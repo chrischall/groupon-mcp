@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 // children} tree).
 import { isCompact, viewArg } from "../view.js";
 import { minifiedResult, toolAnnotations } from "@chrischall/mcp-utils";
+import { foodMeta } from "./hints.js";
 import { z } from "zod";
 import type { GrouponClient, GetDeal, MainNavigation } from "../client.js";
 
@@ -151,6 +152,7 @@ export function registerDetailTools(
         readOnly: true,
         openWorld: true,
       }),
+      _meta: foodMeta("lookup"),
       inputSchema: z.object({
         dealId: z
           .string()
@@ -184,6 +186,7 @@ export function registerDetailTools(
         readOnly: true,
         openWorld: true,
       }),
+      _meta: foodMeta("lookup"),
       inputSchema: z.object({
         view: viewArg(),
       }),

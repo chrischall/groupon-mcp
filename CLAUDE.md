@@ -36,6 +36,7 @@ src/
   graphql-ops.ts        # persisted-query op builders + hashes
   view.ts               # the `view` (compact/full) parameter
   tools/                # healthcheck, deals, detail, cart
+  tools/hints.ts        # `_meta.mint` context-group hints (food group; no canonical read)
 ```
 
 Each tool file exports a `register<Domain>Tools(server, deps)` function that calls `server.registerTool(name, { description, annotations, inputSchema }, handler)` (high-level `McpServer` API with zod schemas) and returns results via `textResult(...)`. `index.ts` wires them through `runMcp` from `@chrischall/mcp-utils`.

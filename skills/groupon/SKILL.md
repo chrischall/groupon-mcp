@@ -47,3 +47,23 @@ card's `.url` (`https://www.groupon.com/deals/<dealId>`).
 
 Note: the deal **web page** `groupon.com/deals/<slug>` returns 403 to servers, but
 the `getDeal` GraphQL op above returns the same detail with no auth.
+
+## In context groups
+
+When this server runs behind mcp-host, its tools join the **food** group
+(`_meta.mint.domain: "food"`). It has **no canonical read**: Groupon is a
+public deal catalogue plus your signed-in cart, and neither is a dated,
+per-person feed, so a "what's new / due / on" ask fans out to the group's
+other members (reservations, orders) and not to Groupon. There are no
+subjects to pick from either. The hints only place the tools in the group:
+the deal reads and `groupon_view_cart` are lookups, `groupon_purchase` and
+`groupon_clear_cart` are cart changes (still confirmation-gated).
+
+A compound ask looks like "what's on for dinner this week, and any Groupon
+deals for pizza nearby?": the group answers the first half from its
+canonical reads and the second by calling `groupon_search_deals`.
+
+The deal reads are anonymous and always answer. The cart tools need a
+groupon.com session lifted through the browser bridge (or
+`GROUPON_SESSION_COOKIE`); without one, the group answers that Groupon
+**needs your browser open** for the cart.
