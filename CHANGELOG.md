@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/chrischall/groupon-mcp/compare/v1.2.0...v1.2.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **deps:** bump @chrischall/mcp-utils ([#165](https://github.com/chrischall/groupon-mcp/issues/165)) ([6d3ace9](https://github.com/chrischall/groupon-mcp/commit/6d3ace9be68a1e2af16f56fd3b3d8dedf162e1da))
+
 ## [1.2.0](https://github.com/chrischall/groupon-mcp/compare/v1.1.10...v1.2.0) (2026-11-04)
 
 
